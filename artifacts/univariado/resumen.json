@@ -1,0 +1,11 @@
+{
+ "filas": 307511,
+ "n_numericas": 93,
+ "n_categoricas": 14,
+ "n_dicotomicas": 43,
+ "target_0": 282686,
+ "target_1": 24825,
+ "tasa_default": 0.08072881945686496,
+ "n_muestra_ajuste": 20000,
+ "semilla": 42
+}

@@ -424,9 +424,9 @@ with tab_na:
          "Estructural", "Sin imputar · flag_sin_previas", "Aplicado"),
         ("POS Cash: HC_N_OPERACIONES_POS, HC_POS_MAX_ATRASO, HC_POS_MAX_CUOTAS_PENDIENTES", "Estructural", "Sin imputar · sin flag", "Aplicado"),
         ("Cuotas: HC_N_REGISTROS_PAGO, HC_N_PAGOS_TARDE, HC_PAY_MAX_ATRASO, HC_PROP_PAGOS_TARDE", "Estructural",
-         "Sin imputar · flag_sin_cuotas", "Pendiente"),
+         "Sin imputar · sin flag", "Aplicado"),
         ("Tarjeta: HC_N_OPERACIONES_TARJETA, HC_CARD_MAX_ATRASO, HC_CARD_MAX_UTILIZACION, HC_CARD_MAX_ULTIMO_SALDO", "Estructural",
-         "Sin imputar · flag_sin_tarjeta", "Pendiente"),
+         "Sin imputar · sin flag", "Aplicado"),
         ("OWN_CAR_AGE", "Estructural", "Sin imputar (ya lo informa FLAG_OWN_CAR)", "Aplicado"),
         ("DAYS_EMPLOYED = 365243", "Centinela", "Reemplazo por 0 · flag_sin_empleo", "Aplicado"),
         ("EXT_SOURCE_1, EXT_SOURCE_3", "Falta de información", "Mediana por edad × tipo de ingreso", "Aplicado"),
@@ -441,9 +441,8 @@ with tab_na:
     ], columns=["Variables", "Tipo de faltante", "Tratamiento", "Estado"])
     plan["Estado"] = plan["Estado"].map({"Aplicado": "✔ Aplicado", "Pendiente": "◷ Pendiente de decisión"})
     tabla_texto(plan)
-    st.caption("Pendientes: las columnas que definían `flag_sin_cuotas` y `flag_sin_tarjeta` en el tablón anterior no existen en el "
-               "oficial (candidatas: `HC_N_REGISTROS_PAGO` y `HC_N_OPERACIONES_TARJETA`); `OCCUPATION_TYPE` sigue sin decisión. "
-               "Además, `flag_sin_buro` y `flag_sin_previas` son el complemento exacto de `TIENE_BUREAU` y `TIENE_HISTORIAL_HOME_CREDIT`.")
+    st.caption("`OCCUPATION_TYPE` sigue sin decisión. Nota: `flag_sin_buro` y `flag_sin_previas` son el complemento exacto de "
+               "`TIENE_BUREAU` y `TIENE_HISTORIAL_HOME_CREDIT`.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. OUTLIERS
@@ -553,11 +552,8 @@ with tab_out:
                                    "pct_del_total": "% del total", "criterio": "Criterio"})
                 [["Variable", "Percentil", "Tope", "Afectados", "% del total", "Criterio"]],
                 {"Tope": "{:,.0f}", "Afectados": "{:,}", "% del total": "{:.2%}"})
-    st.warning("**Pendiente de decisión.** En el tablón anterior también se topeaban `bureau_credito_prom` (p99.9), `pos_max_dpd` (p95) "
-               "e `inst_dias_atraso_prom` (p99). No existen en el tablón oficial: su equivalente más cercano (`HC_POS_MAX_ATRASO`) y el "
-               "resto de candidatas se muestran activando el interruptor de arriba. Destaca que las variables de **atraso** tienen "
-               "colas de miles de días concentradas en créditos antiguos: antes de topear conviene ver si la cola sube o baja el default.",
-               icon=":material/pending_actions:")
+    st.caption("Las variables de historial con colas largas (`BUREAU_*`, `HC_*`) no se topean; su evidencia se muestra activando el "
+               "interruptor de arriba. En las de **atraso**, la cola tiende a tener un default mayor que la base: topearlas podría borrar señal de riesgo.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 4. RESULTADO
@@ -668,7 +664,6 @@ with tab_res:
 
     st.subheader("Qué queda pendiente")
     st.markdown(
-        "- **Flags** `flag_sin_cuotas` y `flag_sin_tarjeta`: elegir su columna en el tablón oficial (o descartarlos).\n"
         "- **Redundancia**: `flag_sin_buro` / `flag_sin_previas` vs. `TIENE_BUREAU` / `TIENE_HISTORIAL_HOME_CREDIT`.\n"
         "- **Topes** de las variables de historial del tablón oficial (candidatas en la pestaña Outliers).\n"
         "- **`OCCUPATION_TYPE`**: 41,019 nulos sin explicación (¿categoría *Faltante*?)."
