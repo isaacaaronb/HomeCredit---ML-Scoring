@@ -59,13 +59,13 @@ st.markdown(
     "comparación **antes / después** con sus validaciones."
 )
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Variables con nulos", f"{(cal.n_nulos > 0).sum()} de {len(cal)}", border=True)
+k1.metric("Variables con nulos", f"{(cal.n_nulos > 0).sum()}", border=True, help=f"De {len(cal)} variables del tablón oficial.")
 k2.metric("Celdas nulas", f"{R['celdas_nulas_antes'] / (N * R['columnas']):.1%}", border=True,
           help=f"{R['celdas_nulas_antes']:,} de {N * R['columnas']:,} celdas del tablón oficial.")
 k3.metric("Variables imputadas", "15", border=True, help="12 numéricas + 3 categóricas; más el centinela de DAYS_EMPLOYED.")
 k4.metric("Variables topeadas", f"{len(t('plan_topes'))}", border=True, help="Winsorización superior por percentil (p95 / p99.9).")
 val = t("validaciones")
-k5.metric("Validaciones superadas", f"{val.ok.sum()} / {len(val)}", border=True)
+k5.metric("Validaciones OK", f"{val.ok.sum()}/{len(val)}", border=True, help="Chequeos automáticos del preprocesamiento.")
 
 tab_diag, tab_na, tab_out, tab_res = st.tabs([":material/fact_check: Diagnóstico de calidad",
                                               ":material/format_color_reset: Valores faltantes",
@@ -565,10 +565,10 @@ with tab_out:
 with tab_res:
     r1, r2, r3, r4 = st.columns(4)
     r1.metric("Columnas", f"{R['columnas_post']}", f"+{R['columnas_post'] - R['columnas']} flags", border=True)
-    r2.metric("Celdas nulas", f"{R['celdas_nulas_despues']:,}", f"{R['celdas_nulas_despues'] - R['celdas_nulas_antes']:,}",
+    r2.metric("Celdas nulas", f"{R['celdas_nulas_despues'] / 1e6:.2f} M", f"{R['celdas_nulas_despues'] - R['celdas_nulas_antes']:,}",
               delta_color="inverse", border=True, help="Las 148 columnas originales. Los nulos estructurales se conservan a propósito.")
-    r3.metric("Nulos por crédito (mediana)", f"{R['nulos_fila_mediana_post']:.1%}",
-              f"{(R['nulos_fila_mediana_post'] - R['nulos_fila_mediana']) * 100:+.1f} p.p.", delta_color="inverse", border=True)
+    r3.metric("Nulos por crédito", f"{R['nulos_fila_mediana_post']:.1%}",
+              f"{(R['nulos_fila_mediana_post'] - R['nulos_fila_mediana']) * 100:+.1f} p.p.", delta_color="inverse", border=True, help="Mediana del % de variables nulas por crédito.")
     r4.metric("Valores topeados", f"{int(t('efecto_topes')['n_modificados'].sum()):,}", border=True,
               help="Suma de valores reemplazados por su tope en las 7 variables.")
 
