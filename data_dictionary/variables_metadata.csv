@@ -1,0 +1,149 @@
+variable,familia,formato,ventana
+SK_ID_CURR,00 · Identificación y objetivo,Entero (ID),—
+TARGET,00 · Identificación y objetivo,Binaria 0/1,Ventana de desempeño posterior a la solicitud
+NAME_CONTRACT_TYPE,01 · Solicitud y capacidad de pago,Binaria (texto),Al momento de la solicitud
+CODE_GENDER,02 · Demografía y estabilidad personal,Categórica nominal,Al momento de la solicitud
+FLAG_OWN_CAR,03 · Laboral y patrimonial,Binaria (Y/N),Al momento de la solicitud
+FLAG_OWN_REALTY,03 · Laboral y patrimonial,Binaria (Y/N),Al momento de la solicitud
+CNT_CHILDREN,02 · Demografía y estabilidad personal,Entero (conteo),Al momento de la solicitud
+AMT_INCOME_TOTAL,01 · Solicitud y capacidad de pago,Monto (u.m.),Al momento de la solicitud
+AMT_CREDIT,01 · Solicitud y capacidad de pago,Monto (u.m.),Al momento de la solicitud
+AMT_ANNUITY,01 · Solicitud y capacidad de pago,Monto (u.m.),Al momento de la solicitud
+AMT_GOODS_PRICE,01 · Solicitud y capacidad de pago,Monto (u.m.),Al momento de la solicitud
+NAME_TYPE_SUITE,01 · Solicitud y capacidad de pago,Categórica nominal,Al momento de la solicitud
+NAME_INCOME_TYPE,03 · Laboral y patrimonial,Categórica nominal,Al momento de la solicitud
+NAME_EDUCATION_TYPE,02 · Demografía y estabilidad personal,Categórica ordinal,Al momento de la solicitud
+NAME_FAMILY_STATUS,02 · Demografía y estabilidad personal,Categórica nominal,Al momento de la solicitud
+NAME_HOUSING_TYPE,04 · Geografía y vivienda,Categórica nominal,Al momento de la solicitud
+REGION_POPULATION_RELATIVE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+DAYS_BIRTH,02 · Demografía y estabilidad personal,Días antes de t (negativo),Días antes de la solicitud (valor negativo)
+DAYS_EMPLOYED,03 · Laboral y patrimonial,Días (negativo),Días antes de la solicitud (valor negativo)
+DAYS_REGISTRATION,02 · Demografía y estabilidad personal,Días (negativo),Días antes de la solicitud (valor negativo)
+DAYS_ID_PUBLISH,02 · Demografía y estabilidad personal,Días (negativo),Días antes de la solicitud (valor negativo)
+OWN_CAR_AGE,03 · Laboral y patrimonial,Años,Al momento de la solicitud
+FLAG_MOBIL,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_EMP_PHONE,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_WORK_PHONE,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_CONT_MOBILE,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_PHONE,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_EMAIL,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+OCCUPATION_TYPE,03 · Laboral y patrimonial,Categórica nominal,Al momento de la solicitud
+CNT_FAM_MEMBERS,02 · Demografía y estabilidad personal,Entero (conteo),Al momento de la solicitud
+REGION_RATING_CLIENT,04 · Geografía y vivienda,Categórica ordinal,Al momento de la solicitud
+REGION_RATING_CLIENT_W_CITY,04 · Geografía y vivienda,Categórica ordinal,Al momento de la solicitud
+WEEKDAY_APPR_PROCESS_START,01 · Solicitud y capacidad de pago,Categórica cíclica,Al momento de la solicitud
+HOUR_APPR_PROCESS_START,01 · Solicitud y capacidad de pago,Entero 0–23,Al momento de la solicitud
+REG_REGION_NOT_LIVE_REGION,05 · Consistencia de direcciones,Binaria 0/1,Al momento de la solicitud
+REG_REGION_NOT_WORK_REGION,05 · Consistencia de direcciones,Binaria 0/1,Al momento de la solicitud
+LIVE_REGION_NOT_WORK_REGION,05 · Consistencia de direcciones,Binaria 0/1,Al momento de la solicitud
+REG_CITY_NOT_LIVE_CITY,05 · Consistencia de direcciones,Binaria 0/1,Al momento de la solicitud
+REG_CITY_NOT_WORK_CITY,05 · Consistencia de direcciones,Binaria 0/1,Al momento de la solicitud
+LIVE_CITY_NOT_WORK_CITY,05 · Consistencia de direcciones,Binaria 0/1,Al momento de la solicitud
+ORGANIZATION_TYPE,03 · Laboral y patrimonial,Categórica nominal,Al momento de la solicitud
+EXT_SOURCE_1,07 · Scores externos,Ratio 0–1,Al momento de la solicitud
+EXT_SOURCE_2,07 · Scores externos,Ratio 0–1,Al momento de la solicitud
+EXT_SOURCE_3,07 · Scores externos,Ratio 0–1,Al momento de la solicitud
+APARTMENTS_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+BASEMENTAREA_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+YEARS_BEGINEXPLUATATION_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+YEARS_BUILD_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+COMMONAREA_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+ELEVATORS_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+ENTRANCES_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+FLOORSMAX_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+FLOORSMIN_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+LANDAREA_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+LIVINGAPARTMENTS_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+LIVINGAREA_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+NONLIVINGAPARTMENTS_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+NONLIVINGAREA_AVG,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+APARTMENTS_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+BASEMENTAREA_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+YEARS_BEGINEXPLUATATION_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+YEARS_BUILD_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+COMMONAREA_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+ELEVATORS_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+ENTRANCES_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+FLOORSMAX_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+FLOORSMIN_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+LANDAREA_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+LIVINGAPARTMENTS_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+LIVINGAREA_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+NONLIVINGAPARTMENTS_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+NONLIVINGAREA_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+APARTMENTS_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+BASEMENTAREA_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+YEARS_BEGINEXPLUATATION_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+YEARS_BUILD_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+COMMONAREA_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+ELEVATORS_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+ENTRANCES_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+FLOORSMAX_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+FLOORSMIN_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+LANDAREA_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+LIVINGAPARTMENTS_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+LIVINGAREA_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+NONLIVINGAPARTMENTS_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+NONLIVINGAREA_MEDI,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+FONDKAPREMONT_MODE,04 · Geografía y vivienda,Categórica nominal,Al momento de la solicitud
+HOUSETYPE_MODE,04 · Geografía y vivienda,Categórica nominal,Al momento de la solicitud
+TOTALAREA_MODE,04 · Geografía y vivienda,Ratio normalizado,Al momento de la solicitud
+WALLSMATERIAL_MODE,04 · Geografía y vivienda,Categórica nominal,Al momento de la solicitud
+EMERGENCYSTATE_MODE,04 · Geografía y vivienda,Binaria (Yes/No),Al momento de la solicitud
+OBS_30_CNT_SOCIAL_CIRCLE,08 · Entorno social,Entero (conteo),Al momento de la solicitud
+DEF_30_CNT_SOCIAL_CIRCLE,08 · Entorno social,Entero (conteo),Al momento de la solicitud
+OBS_60_CNT_SOCIAL_CIRCLE,08 · Entorno social,Entero (conteo),Al momento de la solicitud
+DEF_60_CNT_SOCIAL_CIRCLE,08 · Entorno social,Entero (conteo),Al momento de la solicitud
+DAYS_LAST_PHONE_CHANGE,02 · Demografía y estabilidad personal,Días (negativo),Días antes de la solicitud (valor negativo)
+FLAG_DOCUMENT_2,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_3,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_4,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_5,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_6,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_7,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_8,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_9,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_10,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_11,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_12,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_13,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_14,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_15,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_16,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_17,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_18,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_19,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_20,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+FLAG_DOCUMENT_21,06 · Contacto y documentación,Binaria 0/1,Al momento de la solicitud
+AMT_REQ_CREDIT_BUREAU_HOUR,09 · Consultas al buró,Entero (conteo),1 hora antes de la solicitud
+AMT_REQ_CREDIT_BUREAU_DAY,09 · Consultas al buró,Entero (conteo),1 día antes de la solicitud (excluye la última hora)
+AMT_REQ_CREDIT_BUREAU_WEEK,09 · Consultas al buró,Entero (conteo),1 semana antes de la solicitud (excluye el último día)
+AMT_REQ_CREDIT_BUREAU_MON,09 · Consultas al buró,Entero (conteo),1 mes antes de la solicitud (excluye la última semana)
+AMT_REQ_CREDIT_BUREAU_QRT,09 · Consultas al buró,Entero (conteo),3 meses antes de la solicitud (excluye el último mes)
+AMT_REQ_CREDIT_BUREAU_YEAR,09 · Consultas al buró,Entero (conteo),1 año antes de la solicitud (excluye los últimos 3 meses)
+BUREAU_N_CREDITOS,10 · Historial en buró externo,Entero (conteo),Créditos reportados al buró antes de la solicitud (meses < 0)
+BUREAU_N_ACTIVOS,10 · Historial en buró externo,Entero (conteo),Créditos reportados al buró antes de la solicitud (meses < 0)
+BUREAU_DEUDA_TOTAL,10 · Historial en buró externo,Monto (u.m.),Créditos reportados al buró antes de la solicitud (meses < 0)
+BUREAU_MAX_DIAS_ATRASO,10 · Historial en buró externo,Días,Créditos reportados al buró antes de la solicitud (meses < 0)
+BUREAU_MESES_OBSERVADOS,10 · Historial en buró externo,Entero (meses),Créditos reportados al buró antes de la solicitud (meses < 0)
+BUREAU_MESES_CON_ATRASO,10 · Historial en buró externo,Entero (meses),Créditos reportados al buró antes de la solicitud (meses < 0)
+BUREAU_MESES_ESTADO_CONOCIDO,10 · Historial en buró externo,Entero (meses),Créditos reportados al buró antes de la solicitud (meses < 0)
+BUREAU_PROP_MESES_CON_ATRASO,10 · Historial en buró externo,Ratio 0–1,Créditos reportados al buró antes de la solicitud (meses < 0)
+HC_N_SOLICITUDES,11 · Solicitudes previas en Home Credit,Entero (conteo),Solicitudes previas a Home Credit (sin ventana fija)
+HC_N_APROBADAS,11 · Solicitudes previas en Home Credit,Entero (conteo),Solicitudes previas a Home Credit (sin ventana fija)
+HC_N_RECHAZADAS,11 · Solicitudes previas en Home Credit,Entero (conteo),Solicitudes previas a Home Credit (sin ventana fija)
+HC_DIAS_ULTIMA_DECISION,11 · Solicitudes previas en Home Credit,Días (negativo),Solicitudes previas a Home Credit (sin ventana fija)
+HC_PROP_SOLICITUDES_RECHAZADAS,11 · Solicitudes previas en Home Credit,Ratio 0–1,Solicitudes previas a Home Credit (sin ventana fija)
+HC_N_OPERACIONES_POS,12 · Pagos y mora en Home Credit,Entero (conteo),Meses anteriores a la solicitud (meses < 0)
+HC_POS_MAX_ATRASO,12 · Pagos y mora en Home Credit,Días,Meses anteriores a la solicitud (meses < 0)
+HC_POS_MAX_CUOTAS_PENDIENTES,12 · Pagos y mora en Home Credit,Entero (conteo),Meses anteriores a la solicitud (meses < 0)
+HC_N_OPERACIONES_TARJETA,12 · Pagos y mora en Home Credit,Entero (conteo),Meses anteriores a la solicitud (meses < 0)
+HC_CARD_MAX_ATRASO,12 · Pagos y mora en Home Credit,Días,Meses anteriores a la solicitud (meses < 0)
+HC_CARD_MAX_UTILIZACION,12 · Pagos y mora en Home Credit,Ratio (puede superar 1),Meses anteriores a la solicitud (meses < 0)
+HC_CARD_MAX_ULTIMO_SALDO,12 · Pagos y mora en Home Credit,Monto (u.m.),Meses anteriores a la solicitud (meses < 0)
+HC_N_REGISTROS_PAGO,12 · Pagos y mora en Home Credit,Entero (conteo),Cuotas con vencimiento antes de la solicitud
+HC_N_PAGOS_TARDE,12 · Pagos y mora en Home Credit,Entero (conteo),Cuotas con vencimiento antes de la solicitud
+HC_PAY_MAX_ATRASO,12 · Pagos y mora en Home Credit,Días,Cuotas con vencimiento antes de la solicitud
+HC_PROP_PAGOS_TARDE,12 · Pagos y mora en Home Credit,Ratio 0–1,Cuotas con vencimiento antes de la solicitud
+TIENE_BUREAU,13 · Indicadores de cobertura,Binaria 0/1,Antes de la solicitud
+TIENE_HISTORIAL_HOME_CREDIT,13 · Indicadores de cobertura,Binaria 0/1,Antes de la solicitud

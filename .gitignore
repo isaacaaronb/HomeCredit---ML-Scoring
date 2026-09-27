@@ -10,6 +10,8 @@ credit_card_balance.csv
 installments_payments.csv
 HomeCredit_columns_description.csv
 *.csv
+# excepción: el diccionario curado de la app sí se versiona
+!data_dictionary/*.csv
 
 # Carpeta local de trabajo (base DuckDB, CSV crudos en data/raw, exportaciones intermedias)
 data/
