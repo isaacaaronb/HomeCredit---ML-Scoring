@@ -1,0 +1,29 @@
+{
+  "filas": 307511,
+  "columnas": 148,
+  "columnas_post": 152,
+  "tasa_base": 0.08072881945686496,
+  "nulos_fila_mediana": 0.3082191780821918,
+  "nulos_fila_mediana_post": 0.29333333333333333,
+  "ceros_reales_days_employed": 2,
+  "consultas_nulas": 41519,
+  "consultas_nulas_sin_buro": 41519,
+  "meses_atraso_nulos": 215465,
+  "meses_atraso_nulos_con_creditos": 171445,
+  "meses_atraso_ceros": 61401,
+  "auto_nulos": 202929,
+  "sin_auto": 202924,
+  "auto_nulos_sin_auto": 202924,
+  "auto_edad_cero": 2134,
+  "ocupacion_nulos": 96391,
+  "ocupacion_nulos_centinela": 55372,
+  "ocupacion_default_sin_explicar": 0.08015797557229576,
+  "vivienda_n_vars": 47,
+  "vivienda_parcial_mediana_faltantes": 16,
+  "ext_n_original": {
+    "EXT_SOURCE_1": 134133,
+    "EXT_SOURCE_3": 246546
+  },
+  "celdas_nulas_antes": 11283509,
+  "celdas_nulas_despues": 11042837
+}
