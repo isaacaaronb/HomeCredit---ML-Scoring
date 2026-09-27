@@ -1,0 +1,97 @@
+{
+  "ext_grupo": {
+    "EXT_SOURCE_1": {
+      "global": 0.5059979305057544,
+      "por_ingreso": {
+        "Commercial associate": 0.5042523121653883,
+        "Other": 0.491075935487484,
+        "Pensioner": 0.7289301240694221,
+        "State servant": 0.5308774592324411,
+        "Working": 0.4626021045593885
+      },
+      "por_celda": {
+        "30-40|Commercial associate": 0.4562752365069852,
+        "30-40|Pensioner": 0.3759248176296103,
+        "30-40|State servant": 0.4688794017199847,
+        "30-40|Working": 0.41964285268184554,
+        "40-50|Commercial associate": 0.5954571967622018,
+        "40-50|Pensioner": 0.5564183558550233,
+        "40-50|State servant": 0.6152329346547437,
+        "40-50|Working": 0.5565121938624107,
+        "50-60|Commercial associate": 0.7055369905680859,
+        "50-60|Pensioner": 0.7111151339093114,
+        "50-60|State servant": 0.7313658311349359,
+        "50-60|Working": 0.6763445774369419,
+        ">60|Commercial associate": 0.7997919884140438,
+        ">60|Pensioner": 0.7679931178446526,
+        ">60|Working": 0.7724842172637696,
+        "≤30|Commercial associate": 0.321504659374288,
+        "≤30|State servant": 0.3291360346381369,
+        "≤30|Working": 0.2927736485846216
+      }
+    },
+    "EXT_SOURCE_3": {
+      "global": 0.5352762504724826,
+      "por_ingreso": {
+        "Commercial associate": 0.520897599048938,
+        "Other": 0.4956658291397297,
+        "Pensioner": 0.5919766183185521,
+        "State servant": 0.5406544504453575,
+        "Working": 0.5190973382084597
+      },
+      "por_celda": {
+        "30-40|Commercial associate": 0.5154953751603267,
+        "30-40|Pensioner": 0.5082869913916046,
+        "30-40|State servant": 0.5289912926999761,
+        "30-40|Working": 0.5100895276257282,
+        "40-50|Commercial associate": 0.5495965024956946,
+        "40-50|Pensioner": 0.5832379256761245,
+        "40-50|State servant": 0.5585066276769286,
+        "40-50|Working": 0.5478104658520093,
+        "50-60|Commercial associate": 0.5620604831738043,
+        "50-60|Pensioner": 0.5691487713619409,
+        "50-60|State servant": 0.5779691187553125,
+        "50-60|Working": 0.5620604831738043,
+        ">60|Commercial associate": 0.5867400085415683,
+        ">60|Pensioner": 0.6127042441012546,
+        ">60|State servant": 0.59805932254532,
+        ">60|Working": 0.5832379256761245,
+        "≤30|Commercial associate": 0.4311917977993083,
+        "≤30|State servant": 0.4507472818545589,
+        "≤30|Working": 0.4294236843421945
+      }
+    }
+  },
+  "mediana": {
+    "EXT_SOURCE_2": 0.5659614260608526,
+    "DAYS_LAST_PHONE_CHANGE": -757.0
+  },
+  "moda": {
+    "OBS_30_CNT_SOCIAL_CIRCLE": 0.0,
+    "DEF_30_CNT_SOCIAL_CIRCLE": 0.0,
+    "OBS_60_CNT_SOCIAL_CIRCLE": 0.0,
+    "DEF_60_CNT_SOCIAL_CIRCLE": 0.0,
+    "CNT_FAM_MEMBERS": 2.0
+  },
+  "moda_cat": {
+    "NAME_TYPE_SUITE": "Unaccompanied",
+    "CODE_GENDER": "F",
+    "NAME_FAMILY_STATUS": "Married"
+  },
+  "razon": {
+    "AMT_GOODS_PRICE": {
+      "global": 0.8938148015731141,
+      "por_contrato": {
+        "Cash loans": 0.8833922261484098,
+        "Revolving loans": 1.0
+      }
+    },
+    "AMT_ANNUITY": {
+      "global": 0.05,
+      "por_contrato": {
+        "Cash loans": 0.0483632598518571,
+        "Revolving loans": 0.05
+      }
+    }
+  }
+}

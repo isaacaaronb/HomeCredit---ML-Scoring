@@ -1,0 +1,30 @@
+# Datos crudos de Kaggle y tablón oficial en CSV (no se versionan; el parquet de artifacts/ sí)
+HomeCredit_base.csv
+application_train.csv
+application_test.csv
+bureau.csv
+bureau_balance.csv
+previous_application.csv
+POS_CASH_balance.csv
+credit_card_balance.csv
+installments_payments.csv
+HomeCredit_columns_description.csv
+*.csv
+
+# Carpeta local de trabajo (base DuckDB, CSV crudos en data/raw, exportaciones intermedias)
+data/
+*.duckdb
+*.duckdb.wal
+*.tmp
+
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini

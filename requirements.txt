@@ -1,0 +1,11 @@
+# Versiones fijadas. Notebooks probados con Python 3.11 (pandas 3.0.5) y Python 3.10 (pandas 2.3.3).
+pandas==3.0.5
+numpy==2.4.6
+pyarrow==25.0.1
+duckdb==1.5.5
+jupysql==0.11.1
+duckdb-engine==0.17.0
+scipy==1.17.1
+matplotlib==3.11.2
+streamlit==1.64.0
+plotly==7.1.0

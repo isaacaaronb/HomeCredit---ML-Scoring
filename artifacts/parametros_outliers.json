@@ -1,0 +1,20 @@
+{
+  "percentiles": {
+    "AMT_INCOME_TOTAL": 99.9,
+    "CNT_CHILDREN": 99.9,
+    "CNT_FAM_MEMBERS": 99.9,
+    "OBS_30_CNT_SOCIAL_CIRCLE": 99.9,
+    "OBS_60_CNT_SOCIAL_CIRCLE": 99.9,
+    "AMT_REQ_CREDIT_BUREAU_QRT": 99.9,
+    "OWN_CAR_AGE": 95
+  },
+  "topes": {
+    "AMT_INCOME_TOTAL": 900000.0,
+    "CNT_CHILDREN": 4.0,
+    "CNT_FAM_MEMBERS": 6.0,
+    "OBS_30_CNT_SOCIAL_CIRCLE": 17.0,
+    "OBS_60_CNT_SOCIAL_CIRCLE": 16.0,
+    "AMT_REQ_CREDIT_BUREAU_QRT": 4.0,
+    "OWN_CAR_AGE": 30.0
+  }
+}
