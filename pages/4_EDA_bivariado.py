@@ -18,8 +18,14 @@ COL_RANGO = ["#c9c8c3", "#9db8d9", "#2a78d6", "#1f4e8c", NARANJA]
 
 
 @st.cache_data(show_spinner=False)
+def _leer(ruta: str, version: float) -> pd.DataFrame:
+    return pd.read_parquet(ruta)
+
+
 def t(nombre: str) -> pd.DataFrame:
-    return pd.read_parquet(MOD / f"{nombre}.parquet")
+    """Lee un artefacto; la fecha de modificación entra en la llave del caché para que un redeploy no sirva datos viejos."""
+    ruta = MOD / f"{nombre}.parquet"
+    return _leer(str(ruta), ruta.stat().st_mtime)
 
 
 def nota(texto: str, icono: str = ":material/insights:") -> None:

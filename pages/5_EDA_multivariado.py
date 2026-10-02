@@ -13,8 +13,14 @@ RHO_MAX = 0.60
 
 
 @st.cache_data(show_spinner=False)
+def _leer(ruta: str, version: float) -> pd.DataFrame:
+    return pd.read_parquet(ruta)
+
+
 def t(nombre: str) -> pd.DataFrame:
-    return pd.read_parquet(MOD / f"{nombre}.parquet")
+    """Lee un artefacto; la fecha de modificación entra en la llave del caché para que un redeploy no sirva datos viejos."""
+    ruta = MOD / f"{nombre}.parquet"
+    return _leer(str(ruta), ruta.stat().st_mtime)
 
 
 def fam_corta(f) -> str:
