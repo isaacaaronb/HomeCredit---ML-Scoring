@@ -125,7 +125,7 @@ with tab_par:
                                     "metrica_2": st.column_config.NumberColumn(f"{metrica} 2", format="%.4f"),
                                     "resultado": st.column_config.TextColumn("Según la regla", width=380)})
         ch = decisivos.copy()
-        ch["par"] = ch["variable_1"] + " ↔ " + ch["variable_2"]
+        ch["par"] = [f"{a} ↔ {b}" for a, b in zip(ch["variable_1"], ch["variable_2"])]
         ch["ini"] = 0.5
         st.altair_chart(alt.Chart(ch, title=alt.TitleParams("Pares que deciden una exclusión", subtitle=f"|ρ| desde 0.5; línea punteada: umbral {RHO_MAX}",
                                                             anchor="start")).mark_bar(color=NARANJA, height={"band": 0.7}, cornerRadiusEnd=3).encode(

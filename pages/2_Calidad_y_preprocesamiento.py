@@ -502,7 +502,7 @@ with tab_out:
         ev["resultado"] = ev["p_valor"].apply(lambda p: "n/d" if pd.isna(p) else ("Homogénea (p ≥ 0.05)" if p >= 0.05 else "Difiere (p < 0.05)"))
         ev["texto"] = ev.apply(lambda r: f"n/d · n={r.n_afectados:,}" if pd.isna(r.p_valor) else
                                (f"p<0.001 · n={r.n_afectados:,}" if r.p_valor < 0.001 else f"p={r.p_valor:.3f} · n={r.n_afectados:,}"), axis=1)
-        ev["corte"] = "cola sobre p" + ev["percentil"].map(lambda p: f"{p:g}")
+        ev["corte"] = [f"cola sobre p{float(x):g}" for x in ev["percentil"]]
         base_h = alt.Chart(ev).encode(x=alt.X("corte:N", title=None, axis=alt.Axis(orient="top", labelAngle=0)),
                                       y=alt.Y("variable:N", sort=colas["variable"].tolist(), title=None, axis=alt.Axis(labelLimit=240)))
         calor = base_h.mark_rect(stroke="white", strokeWidth=2).encode(
