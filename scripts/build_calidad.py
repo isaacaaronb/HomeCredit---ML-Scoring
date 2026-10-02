@@ -6,7 +6,8 @@ de ese notebook, para que la app no tenga que cargar tres tablones de 307,511 fi
 Entradas:
   artifacts/tablon_general.parquet     tablón oficial (antes del preprocesamiento)
   artifacts/tablon_imputado.parquet    tras el tratamiento de faltantes y centinelas (notebook)
-  artifacts/tablon_tratado.parquet     tras los topes de outliers (notebook)
+  artifacts/tablon_tratado.parquet     tras la reasignación de outliers (scripts/pipeline_modelado.py outliers)
+  artifacts/modelado/particion.parquet · outliers_reasignacion.parquet (la evidencia de outliers se calcula en train)
   artifacts/parametros_imputacion.json · artifacts/parametros_outliers.json
   data_dictionary/diccionario_tablon.csv
 
@@ -42,7 +43,7 @@ CRITERIO = {
     "OBS_30_CNT_SOCIAL_CIRCLE": "Cola homogénea; neutraliza el valor 348 (el siguiente es 47).",
     "OBS_60_CNT_SOCIAL_CIRCLE": "Cola homogénea; neutraliza el valor 344 (el siguiente es 47).",
     "AMT_REQ_CREDIT_BUREAU_QRT": "Neutraliza el valor 261 (el siguiente es 19).",
-    "OWN_CAR_AGE": "p99 = 64 no corrige el bloque anómalo de 64–65 años; p95 = 30 con cola homogénea.",
+    "OWN_CAR_AGE": "64–65 años es un bloque de codificación y 91 es imposible; hasta 63 años es raro pero plausible.",
 }
 CANDIDATAS = ["BUREAU_DEUDA_TOTAL", "BUREAU_MAX_DIAS_ATRASO", "HC_POS_MAX_ATRASO", "HC_CARD_MAX_ATRASO",
               "HC_PAY_MAX_ATRASO", "HC_CARD_MAX_UTILIZACION"]
@@ -425,15 +426,18 @@ def main() -> None:
          all((imp.loc[df[c].notna(), c] == df.loc[df[c].notna(), c]).all() for c in imputadas if c != "CNT_FAM_MEMBERS")),
         ("Faltantes", "Solo cambiaron las columnas previstas", cambiaron == esperadas),
     ]
-    topes = p_out["topes"]
+    topes = p_out["umbrales"]
     vars_out = list(topes)
     cambio_out = {c for c in imp.columns if not imp[c].equals(trat[c])}
     val += [
         ("Outliers", "Misma forma y columnas que el tablón imputado", trat.shape == imp.shape and list(trat.columns) == list(imp.columns)),
-        ("Outliers", "Solo cambiaron las variables topeadas", cambio_out == set(vars_out)),
-        ("Outliers", "Ningún valor supera su tope", all(trat[v].max() <= topes[v] for v in vars_out)),
+        ("Outliers", "Solo cambiaron las variables tratadas", cambio_out == set(vars_out)),
+        ("Outliers", "Ningún valor supera su umbral", all(trat[v].max() <= topes[v] for v in vars_out)),
+        ("Outliers", "Cada atípico recibió el valor de su tramo destino",
+         all((trat.loc[imp[v] > topes[v], v] == p_out["valores_asignados"][v]).all() for v in vars_out)),
         ("Outliers", "Nulos intactos", all(trat[v].isna().equals(imp[v].isna()) for v in vars_out)),
-        ("Outliers", "Valores ≤ tope intactos", all(trat.loc[imp[v] <= topes[v], v].equals(imp.loc[imp[v] <= topes[v], v]) for v in vars_out)),
+        ("Outliers", "Valores ≤ umbral intactos", all(trat.loc[imp[v] <= topes[v], v].equals(imp.loc[imp[v] <= topes[v], v]) for v in vars_out)),
+        ("Outliers", "Reglas aprendidas solo con train (partición 70/30 estratificada, semilla 42)", p_out.get("aprendido_en") == "train"),
         ("Outliers", "Coherencia miembros ≥ hijos + 1 no empeora",
          int((trat["CNT_FAM_MEMBERS"] < trat["CNT_CHILDREN"] + 1).sum()) <= int((imp["CNT_FAM_MEMBERS"] < imp["CNT_CHILDREN"] + 1).sum())),
     ]
@@ -441,12 +445,15 @@ def main() -> None:
     res["celdas_nulas_antes"] = int(df.isna().sum().sum())
     res["celdas_nulas_despues"] = int(trat[df.columns].isna().sum().sum())
 
-    # ══ 4. OUTLIERS ═════════════════════════════════════════════════════════════
+    # ══ 4. OUTLIERS (evidencia sobre train: usa el TARGET) ══════════════════════
+    part = pd.read_parquet(ART / "modelado" / "particion.parquet").set_index("SK_ID_CURR")["muestra"]
+    imp_full = imp
+    imp = imp[imp["SK_ID_CURR"].map(part) == "train"]
     y_all = imp["TARGET"]
     filas_colas, filas_def, filas_ev, filas_curva = [], [], [], []
     qgrid = np.linspace(0.90, 1.0, 201)
     for v in vars_out + CANDIDATAS:
-        estado_v = "Topeada" if v in vars_out else "Candidata (pendiente)"
+        estado_v = "Tratada" if v in vars_out else "Candidata (sin tratar)"
         s = imp[v].dropna()
         t = {p: tope(s, p) for p in PCTS}
         filas_colas.append({"variable": v, "estado": estado_v, "mediana": s.median(), "p95": t[95], "p99": t[99], "p99.9": t[99.9],
@@ -475,7 +482,7 @@ def main() -> None:
                              "default_cola": cola.mean() if len(cola) else np.nan, "p_valor": p_val,
                              "delta_logL": logit_ll(xc, yv) - ll0, "delta_AUC": auc(xc, yv) - auc0})
         antes = s.quantile(qgrid).values
-        despues = trat[v].dropna().quantile(qgrid).values if v in vars_out else [np.nan] * len(qgrid)
+        despues = trat.loc[imp.index, v].dropna().quantile(qgrid).values if v in vars_out else [np.nan] * len(qgrid)
         filas_curva += [{"variable": v, "estado": estado_v, "percentil": q * 100, "antes": a, "despues": d}
                         for q, a, d in zip(qgrid, antes, despues)]
     guardar("colas", pd.DataFrame(filas_colas))
@@ -490,17 +497,17 @@ def main() -> None:
                                           "tasa": float(y_all[s.index][(s >= a) & (s <= b)].mean()) if ((s >= a) & (s <= b)).sum() >= 100 else np.nan,
                                           "bloque": e in ("64", "65")} for (a, b), e in zip(tramos, etq)]))
 
-    plan = pd.DataFrame({"variable": vars_out, "percentil": [p_out["percentiles"][v] for v in vars_out],
-                         "tope": [topes[v] for v in vars_out],
-                         "n_afectados": [int((imp[v] > topes[v]).sum()) for v in vars_out],
-                         "criterio": [CRITERIO[v] for v in vars_out]})
-    plan["pct_del_total"] = plan["n_afectados"] / N
-    guardar("plan_topes", plan)
-    guardar("efecto_topes", pd.DataFrame([{"variable": v, "tope": topes[v], "n_modificados": int((imp[v] > topes[v]).sum()),
-                                           "max_antes": imp[v].max(), "max_despues": trat[v].max(),
-                                           "media_antes": imp[v].mean(), "media_despues": trat[v].mean(),
-                                           "std_antes": imp[v].std(), "std_despues": trat[v].std(),
-                                           "asim_antes": imp[v].skew(), "asim_despues": trat[v].skew()} for v in vars_out]))
+    reas = pd.read_parquet(ART / "modelado" / "outliers_reasignacion.parquet")
+    reas["criterio_negocio"] = reas["variable"].map(CRITERIO)
+    guardar("plan_outliers", reas)
+    guardar("outliers_tramos", pd.read_parquet(ART / "modelado" / "outliers_tramos.parquet"))
+    imp = imp_full
+    guardar("efecto_outliers", pd.DataFrame([{"variable": v, "umbral": topes[v], "valor_asignado": p_out["valores_asignados"][v],
+                                              "n_modificados": int((imp[v] > topes[v]).sum()),
+                                              "max_antes": imp[v].max(), "max_despues": trat[v].max(),
+                                              "media_antes": imp[v].mean(), "media_despues": trat[v].mean(),
+                                              "std_antes": imp[v].std(), "std_despues": trat[v].std(),
+                                              "asim_antes": imp[v].skew(), "asim_despues": trat[v].skew()} for v in vars_out]))
 
     json.dump(res, open(OUT / "resumen.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2, default=float)
     print(f"Listo: {len(list(OUT.glob('*.parquet')))} tablas en {OUT.relative_to(REPO)}")

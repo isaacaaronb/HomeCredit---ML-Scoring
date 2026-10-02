@@ -53,7 +53,7 @@ def fam_corta(f: str) -> str:
 # Lectura de negocio: qué se espera de cada variable (sirve para decir si la forma observada es "consistente")
 ESPERADO = {
     "AMT_INCOME_TOTAL": "Ingresos: se espera sesgo a la derecha (muchos ingresos medios, pocos muy altos), típico de una lognormal. "
-                        "El tope en p99.9 quitó el valor de 117 M; la cola que queda es real.",
+                        "Los 278 ingresos > 900 mil (máximo 117 M) se reasignaron al tramo alto con su misma tasa de default; la cola que queda es real.",
     "AMT_CREDIT": "Monto del crédito: sesgo a la derecha y picos en montos redondos (450 mil, 675 mil…), propios de productos "
                   "estandarizados. Consistente con lo esperado.",
     "AMT_ANNUITY": "Cuota: sigue al monto del crédito, con sesgo a la derecha. Los picos son cuotas de productos estándar.",
@@ -66,8 +66,8 @@ ESPERADO = {
                      "exactamente 0 por el reemplazo del centinela (pensionistas y sin empleador).",
     "DAYS_REGISTRATION": "Antigüedad del registro del domicilio: cola larga hacia registros antiguos. Esperable.",
     "DAYS_ID_PUBLISH": "Antigüedad del documento de identidad: forma irregular porque la renovación sigue reglas por edad.",
-    "OWN_CAR_AGE": "Edad del auto (solo quienes tienen auto): autos mayormente nuevos o de pocos años; el tope en p95 = 30 "
-                   "neutralizó el bloque anómalo de 64–65 años.",
+    "OWN_CAR_AGE": "Edad del auto (solo quienes tienen auto): autos mayormente nuevos o de pocos años. El bloque anómalo de 64–65 "
+                   "años y los de 91 se reasignaron a 16 años, el tramo con su misma tasa de default; ya no hay un pico artificial en 30.",
     "CNT_CHILDREN": "Hijos: conteo con la mayoría en 0; la binomial negativa captura la sobredispersión frente a Poisson.",
     "CNT_FAM_MEMBERS": "Miembros de la familia: conteo con moda en 2 (pareja). Muy concentrado; poca dispersión.",
     "HOUR_APPR_PROCESS_START": "Hora de la solicitud: forma de campana alrededor del mediodía, horario comercial. Es operativa, no "
@@ -81,7 +81,7 @@ ESPERADO = {
     "DAYS_LAST_PHONE_CHANGE": "Días desde el último cambio de teléfono: el 12 % lo cambió el mismo día de la solicitud (valor 0).",
     "AMT_REQ_CREDIT_BUREAU_YEAR": "Consultas al buró en el último año: conteo con sobredispersión; más consultas → más búsqueda de crédito.",
     "BUREAU_DEUDA_TOTAL": "Deuda total en buró: cola extremadamente larga (asimetría ~39) y un 27 % en 0. Es la variable más asimétrica "
-                          "tras el tratamiento; no se topeó para no borrar señal.",
+                          "tras el tratamiento; no se trató para no borrar señal.",
     "BUREAU_MAX_DIAS_ATRASO": "Peor atraso en buró: 98.7 % en 0. Casi binaria (tuvo atraso o no) con una cola de miles de días.",
     "HC_POS_MAX_ATRASO": "Peor atraso en POS: 81 % en 0 y cola larga. Masa en cero: ninguna familia continua ajusta bien.",
     "HC_CARD_MAX_UTILIZACION": "Utilización máxima de tarjeta: bimodal (31 % en 0 y una masa alrededor de 100 %). Dos poblaciones: "
@@ -122,9 +122,9 @@ k3.metric("Dicotómicas", len(dic), border=True, help="Incluye los 4 flags cread
 k4.metric("Tasa de default", f"{R['tasa_default']:.2%}", border=True, help=f"{R['target_1']:,} de {N:,} créditos.")
 k5.metric("Casi constantes", int(dic["casi_constante"].sum()), border=True, help="Dicotómicas con clase minoritaria < 1 %.")
 
-tab_pan, tab_num, tab_cat, tab_dic, tab_hal = st.tabs([":material/dashboard: Panorama", ":material/show_chart: Numéricas",
-                                                       ":material/category: Categóricas", ":material/toggle_on: Dicotómicas",
-                                                       ":material/task_alt: Hallazgos y conclusiones"])
+tab_pan, tab_num, tab_cat, tab_dic, tab_hal, tab_fil = st.tabs([":material/dashboard: Panorama", ":material/show_chart: Numéricas",
+                                                                ":material/category: Categóricas", ":material/toggle_on: Dicotómicas",
+                                                                ":material/task_alt: Hallazgos", ":material/filter_alt: Filtro univariado"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PANORAMA
@@ -222,7 +222,7 @@ with tab_pan:
     with v2:
         st.markdown(
             "- **Missing**: bajó de 25.1 % a 23.9 % de celdas; el resto son nulos **estructurales** que se conservaron a propósito.\n"
-            "- **Outliers**: la asimetría máxima cae de **391.6** (`AMT_INCOME_TOTAL`) a **38.6** (`BUREAU_DEUDA_TOTAL`, sin tope). "
+            f"- **Outliers**: la asimetría máxima cae de **{v.loc['ex-ante', 'asim_max']:.1f}** (`AMT_INCOME_TOTAL`) a **{v.loc['ex-post', 'asim_max']:.1f}** (`BUREAU_DEUDA_TOTAL`, sin tratar). "
             "El conteo de variables asimétricas no cambia: su asimetría es forma, no error.\n"
             "- **Centinela**: `DAYS_EMPLOYED = 365243` ya no existe.\n"
             "- **Cardinalidad**: no se redujo (58 en `ORGANIZATION_TYPE`); los 55,374 `XNA` que quedan son la categoría real "
@@ -597,8 +597,8 @@ with tab_dic:
             "- `flag_sin_empleo` es casi el complemento de `FLAG_EMP_PHONE`: el centinela coincide con «no dio teléfono del empleador».\n"
             "- Aportan la misma información dos veces: en el modelo basta una de cada par.")
     nota("Una dicotómica casi constante no puede separar clases: con 13 créditos (`FLAG_DOCUMENT_2`) o 1 (`FLAG_MOBIL`) en la clase "
-         "minoritaria no hay base estadística para estimar su efecto. Aun así, **no se descarta en el univariado**: si esos pocos casos "
-         "tuvieran un default extremo, el bivariado lo mostrará; lo esperable es que su IV sea casi nulo.")
+         "minoritaria no hay base estadística para estimar su efecto. Por eso el **filtro univariado** elimina toda variable cuyo valor "
+         "dominante concentra ≥ 99 % de los datos (ver la pestaña *Filtro univariado*).")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HALLAZGOS
@@ -627,9 +627,9 @@ with tab_hal:
     with o3, st.container(border=True):
         st.markdown(
             "**3 · Outliers relevantes**\n\n"
-            "- Tras los topes, los outliers que quedan son **forma, no error**: están en variables de historial cuyo IQR es 0 por la "
+            "- Tras la reasignación, los outliers que quedan son **forma, no error**: están en variables de historial cuyo IQR es 0 por la "
             "concentración en cero.\n"
-            "- `BUREAU_DEUDA_TOTAL` (asimetría 38.6) es la más extrema; no se topeó porque su cola tiene señal (ver *Calidad*).\n"
+            "- `BUREAU_DEUDA_TOTAL` (asimetría 38.6) es la más extrema; no se trató porque su cola tiene señal (ver *Calidad*).\n"
             "- `DAYS_EMPLOYED` ex-post tiene un **pico artificial en 0** (18 %) por el reemplazo del centinela.")
     with o4, st.container(border=True):
         st.markdown(
@@ -639,96 +639,129 @@ with tab_hal:
             "- Lo **no esperado** está en variables operativas (`HOUR_APPR_PROCESS_START`, `WEEKDAY_APPR_PROCESS_START`) y en "
             "documentos casi nunca entregados: poca razón de negocio para que expliquen el riesgo.")
 
-    st.subheader("Semáforo de utilidad para modelar")
-    st.caption("No elimina variables: marca cuáles llegan débiles al bivariado y por qué. La decisión final se toma con IV, Spearman y "
-               "pares redundantes (Pasos 6.3–6.6).")
-    red_d = t("redundancia_dicotomicas")
-    red_v = t("redundancia_vivienda")
-    lg_all = t("num_log").query("pasada == 'ex-post'").set_index("variable")
-    fl = []
-    for _, r in num.iterrows():
-        a, s = [], "Sin alertas"
-        if r.pct_moda >= 0.99:
-            a.append(f"dominada por un valor ({r.pct_moda:.1%})"); s = "Candidata a descartar"
-        if r.variable.endswith(("_MODE", "_MEDI")) and r.variable.rsplit("_", 1)[0] in set(red_v["base"]):
-            a.append("versión redundante de _AVG (ρ ≥ 0.91)"); s = "Redundante (confirmar en multivariado)" if s == "Sin alertas" else s
-        if r.fill_rate < 0.5:
-            a.append(f"fill rate {r.fill_rate:.0%}")
-            s = "Revisar en bivariado" if s == "Sin alertas" else s
-        if r.pct_ceros > 0.6 and not r.es_conteo and r.pct_moda < 0.99:
-            a.append(f"{r.pct_ceros:.0%} de ceros")
-            s = "Discretizar (masa en cero)" if s == "Sin alertas" else s
-        if r.variable in lg_all.index and abs(lg_all.loc[r.variable, "asim_log"]) < 1 and r["max"] > 1.5:
-            a.append(f"log reduce la asimetría a {lg_all.loc[r.variable, 'asim_log']:.2f}")
-            s = "Transformar (log)" if s == "Sin alertas" else s
-        fl.append({"variable": r.variable, "tipo": "numérica", "familia": r.familia, "alertas": "; ".join(a), "sugerencia": s})
-    for _, r in cat.iterrows():
-        a, s = [], "Sin alertas"
-        if r.pct_moda >= 0.99:
-            a.append(f"moda {r.pct_moda:.1%}"); s = "Candidata a descartar"
-        if r.cardinalidad_alta:
-            a.append(f"{int(r.n_categorias)} categorías"); s = "Agrupar categorías" if s == "Sin alertas" else s
-        elif r.n_cat_raras > 0 and r.pct_obs_en_raras > 0.005:
-            a.append(f"{int(r.n_cat_raras)} categorías raras"); s = "Agrupar categorías" if s == "Sin alertas" else s
-        if r.fill_rate < 0.5:
-            a.append(f"fill rate {r.fill_rate:.0%}"); s = "Revisar en bivariado" if s == "Sin alertas" else s
-        fl.append({"variable": r.variable, "tipo": "categórica", "familia": r.familia, "alertas": "; ".join(a), "sugerencia": s})
-    redund = {row.variable_a: row.variable_b for row in red_d.itertuples()} | {row.variable_b: row.variable_a for row in red_d.itertuples()}
-    for _, r in dic.iterrows():
-        a, s = [], "Sin alertas"
-        if r.casi_constante:
-            a.append(f"minoritaria {r.pct_minoritaria_validos:.2%}"); s = "Candidata a descartar"
-        if r.variable in redund:
-            a.append(f"redundante con {redund[r.variable]}"); s = "Redundante (elegir una)" if s == "Sin alertas" else s
-        if r.pct_nulo > 0.3:
-            a.append(f"{r.pct_nulo:.0%} nulos"); s = "Revisar en bivariado" if s == "Sin alertas" else s
-        fl.append({"variable": r.variable, "tipo": "dicotómica", "familia": r.familia, "alertas": "; ".join(a), "sugerencia": s})
-    sem = pd.DataFrame(fl)
-    orden_s = ["Candidata a descartar", "Redundante (elegir una)", "Redundante (confirmar en multivariado)", "Revisar en bivariado",
-               "Discretizar (masa en cero)", "Transformar (log)", "Agrupar categorías", "Sin alertas"]
-    col_sem = ["#c2410c", "#eb6834", "#f2a27f", "#8a8a85", "#7f5fc8", "#1baf7a", "#c98a2b", "#2a78d6"]
-    cnt = sem.groupby(["sugerencia", "tipo"]).size().reset_index(name="n")
-    st.altair_chart(alt.Chart(cnt).mark_bar(height={"band": 0.7}).encode(
-        y=alt.Y("sugerencia:N", sort=orden_s, title=None, axis=alt.Axis(labelLimit=260, labelOverlap=False)),
-        x=alt.X("n:Q", title="Variables", stack=True), color=alt.Color("tipo:N", scale=COLOR_TIPO, title=None, legend=alt.Legend(orient="top")),
-        tooltip=[alt.Tooltip("sugerencia:N"), alt.Tooltip("tipo:N"), alt.Tooltip("n:Q", title="Variables")]),
-        width="stretch", height=330)
-    filtro = st.multiselect("Filtrar por sugerencia", orden_s, default=[x for x in orden_s if x != "Sin alertas"], key="f_sem")
-    vista_s = sem[sem["sugerencia"].isin(filtro)] if filtro else sem
-    vista_s = vista_s.assign(o=vista_s["sugerencia"].map({k: i for i, k in enumerate(orden_s)})).sort_values(["o", "tipo", "variable"])
-    st.dataframe(vista_s[["variable", "tipo", "familia", "sugerencia", "alertas"]].assign(familia=lambda d: d["familia"].map(fam_corta)),
-                 hide_index=True, width="stretch", height=420,
-                 column_config={"variable": st.column_config.TextColumn("Variable", width=230),
-                                "tipo": st.column_config.TextColumn("Tipo", width=90),
-                                "familia": st.column_config.TextColumn("Familia", width=180),
-                                "sugerencia": st.column_config.TextColumn("Sugerencia", width=250),
-                                "alertas": st.column_config.TextColumn("Por qué", width=330)})
-    st.caption(f"{int((sem.sugerencia == 'Candidata a descartar').sum())} candidatas a descartar · "
-               f"{int(sem.sugerencia.str.startswith('Redundante').sum())} redundantes · "
-               f"{int((sem.sugerencia == 'Sin alertas').sum())} sin alertas, de {len(sem)} variables explicativas.")
-
-    with st.expander("Redundancia en vivienda (_AVG / _MEDI / _MODE): vista previa", icon=":material/content_copy:"):
-        tabla_texto(red_v.rename(columns={"base": "Variable base", "n_variables": "Versiones", "rho_avg_medi": "ρ AVG–MEDI",
-                                          "rho_avg_mode": "ρ AVG–MODE", "pct_avg_igual_medi": "% AVG = MEDI",
-                                          "n_completos": "Filas completas"}),
-                    {"ρ AVG–MEDI": "{:.3f}", "ρ AVG–MODE": "{:.3f}", "% AVG = MEDI": "{:.1%}", "Filas completas": "{:,}"})
-        st.caption("ρ de Spearman entre versiones de la misma medida del edificio. Con ρ ≥ 0.91, las tres versiones cuentan lo mismo: "
-                   "el Paso 6.6 decidirá cuál conservar (normalmente la de mayor IV).")
-
     st.subheader("Preguntas para discutir antes del bivariado")
     st.markdown(
         "1. **`DAYS_EMPLOYED = 0` junta dos perfiles opuestos.** El reemplazo del centinela pone a los pensionistas (default ≈ 5.4 %) "
-        "en el mismo valor que quien recién empezó a trabajar (≈ 10.7 %). Un `qcut` los pondrá en el mismo tramo (el de menor antigüedad). ¿El modelo verá "
-        "`flag_sin_empleo` junto a `DAYS_EMPLOYED`, o conviene que el 0 sea un tramo propio?\n"
-        "2. **Tope y regla de tipos.** Tras topear, `CNT_CHILDREN` y `AMT_REQ_CREDIT_BUREAU_QRT` quedan con 5 valores y la regla del "
-        "notebook las pasaría a categóricas. Aquí se mantuvieron numéricas: ¿un conteo debe cambiar de tipo por un tope?\n"
-        "3. **`HC_N_OPERACIONES_TARJETA`** tiene un 99.4 % de «1» entre sus valores no nulos: toda su información está en si es nula "
-        "(tiene o no tarjeta). ¿Categórica, numérica, o reemplazarla por un indicador?\n"
-        "4. **log(1 + x) no sirve en [0, 1].** La regla del notebook marca 31 variables de vivienda para la vista log, pero en ese rango "
+        "en el mismo valor que quien recién empezó a trabajar (≈ 10.7 %). En el bivariado esto se ve: el patrón de `DAYS_EMPLOYED` "
+        "por `qcut` es **no lineal (∩)** en vez de monótono. ¿Conviene que el 0 sea un tramo propio o que `flag_sin_empleo` acompañe "
+        "a la variable?\n"
+        "2. **La regla de tipos y los outliers.** Tras reasignar atípicos, `CNT_CHILDREN` y `AMT_REQ_CREDIT_BUREAU_QRT` quedan con 5 "
+        "valores y la regla del notebook (≤ 5 → categórica) las cambiaría de tipo. Se mantuvieron numéricas: ¿un conteo debe "
+        "cambiar de tipo por un tratamiento?\n"
+        "3. **log(1 + x) no sirve en [0, 1].** La regla del notebook marca 31 variables de vivienda para la vista log, pero en ese rango "
         "la transformación casi no cambia la forma. Si se transforma, debe ser por evidencia, no por regla.\n"
-        "5. **`CODE_GENDER` como predictor.** Estadísticamente es una dicotómica bien balanceada; regulatoriamente, usar el género en "
-        "una decisión de crédito es discutible en muchas jurisdicciones. ¿Entra al modelo aunque tenga IV?"
+        "4. **`CODE_GENDER` como predictor.** Estadísticamente es una dicotómica bien balanceada y pasa el filtro de Gini; "
+        "regulatoriamente, usar el género en una decisión de crédito es discutible en muchas jurisdicciones. ¿Debe entrar al modelo?"
     )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FILTRO UNIVARIADO
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_fil:
+    MOD = REPO_DIR / "artifacts" / "modelado"
+    fu = pd.read_parquet(MOD / "filtro_univariado.parquet")
+    gr = pd.read_parquet(MOD / "grupos_cardinalidad.parquet")
+    st.markdown(
+        "Qué variables **entran al bivariado**. Los criterios los fijó el equipo con el feedback del asistente de docencia; el Gini "
+        "se calcula **solo con train** (70 %, estratificado), con los tramos supervisados de OptBinning y el nulo como tramo propio.")
+    c1, c2, c3 = st.columns(3, gap="medium")
+    with c1, st.container(border=True):
+        st.markdown(":red-badge[Varianza casi nula]  \nUn valor concentra **≥ 99 %** de los datos no nulos (p. ej. los "
+                    "`FLAG_DOCUMENT_*`). No hay variación que pueda separar clases.  \n**Decisión:** eliminar.")
+    with c2, st.container(border=True):
+        st.markdown(":orange-badge[Nulos altos sin poder]  \nMás de **50 %** de nulos **y** Gini < **0.08** (el mismo umbral mínimo "
+                    "del dataset de ML). Si el Gini lo compensa, el nulo es informativo y se conserva.  \n**Decisión:** eliminar.")
+    with c3, st.container(border=True):
+        st.markdown(":blue-badge[Alta cardinalidad]  \nMás de **15** categorías. Se **agrupan por tasa de default** (OptBinning "
+                    "categórico, ≤ 5 grupos, ≥ 5 % por grupo). Si no hay grupos con default distinto, se elimina.  \n**Decisión:** agrupar.")
+
+    fu["motivo_corto"] = np.select([fu["decision"].eq("Agrupa"), fu["motivo"].str.startswith("Varianza"),
+                                    fu["motivo"].str.contains("no lo compensa"), fu["motivo"].str.contains("se conserva")],
+                                   ["Agrupada por tasa de default", "Elimina · varianza casi nula", "Elimina · nulos sin poder",
+                                    "Pasa · nulo informativo"], "Pasa")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Variables evaluadas", len(fu), border=True)
+    k2.metric("Pasan al bivariado", int((fu["decision"] != "Elimina").sum()), border=True)
+    k3.metric("Eliminadas · varianza", int(fu["motivo_corto"].eq("Elimina · varianza casi nula").sum()), border=True)
+    k4.metric("Eliminadas · nulos", int(fu["motivo_corto"].eq("Elimina · nulos sin poder").sum()), border=True)
+
+    DOM = ["Pasa", "Pasa · nulo informativo", "Agrupada por tasa de default", "Elimina · nulos sin poder", "Elimina · varianza casi nula"]
+    RNG = [AZUL, "#7fb0ea", VERDE, NARANJA, "#c2410c"]
+    f1, f2 = st.columns([3, 2], gap="large")
+    base_p = alt.Chart(fu).encode(
+        x=alt.X("pct_nulos:Q", title="% de nulos (train)", axis=PCT, scale=alt.Scale(domain=[0, 0.8])),
+        y=alt.Y("gini:Q", title="Gini univariado (train)", scale=alt.Scale(type="sqrt", domain=[0, 0.32])))
+    puntos = base_p.mark_circle(size=70, opacity=0.85, stroke="white", strokeWidth=0.8).encode(
+        color=alt.Color("motivo_corto:N", scale=alt.Scale(domain=DOM, range=RNG), legend=alt.Legend(orient="top", title=None, columns=2, labelLimit=260)),
+        tooltip=[alt.Tooltip("variable:N"), alt.Tooltip("motivo_corto:N", title="Decisión"), alt.Tooltip("pct_nulos:Q", format=".1%", title="% nulos"),
+                 alt.Tooltip("gini:Q", format=".3f"), alt.Tooltip("pct_dominante:Q", format=".2%", title="% valor dominante")])
+    reglas = (alt.Chart(pd.DataFrame({"x": [0.5]})).mark_rule(strokeDash=[5, 4], color=GRIS).encode(x="x:Q")
+              + alt.Chart(pd.DataFrame({"y": [0.08]})).mark_rule(strokeDash=[5, 4], color=GRIS).encode(y="y:Q"))
+    zona = alt.Chart(pd.DataFrame({"x": [0.5], "x2": [0.8], "y": [0], "y2": [0.08]})).mark_rect(color=NARANJA, opacity=0.08).encode(
+        x="x:Q", x2="x2:Q", y="y:Q", y2="y2:Q")
+    f1.altair_chart((zona + reglas + puntos).properties(title={"text": "Nulos vs. poder discriminante",
+                    "subtitle": "Zona sombreada: > 50 % de nulos y Gini < 0.08 → se elimina"}), width="stretch", height=420)
+    cnt = fu.assign(fam=fu["familia"].map(fam_corta)).groupby(["fam", "familia", "motivo_corto"]).size().reset_index(name="n")
+    f2.altair_chart(alt.Chart(cnt).mark_bar(height={"band": 0.72}).encode(
+        y=alt.Y("fam:N", sort=cnt.sort_values("familia")["fam"].unique().tolist(), title=None, axis=alt.Axis(labelLimit=200, labelOverlap=False)),
+        x=alt.X("n:Q", title="Variables", stack=True),
+        color=alt.Color("motivo_corto:N", scale=alt.Scale(domain=DOM, range=RNG), legend=None),
+        order=alt.Order("motivo_corto:N"),
+        tooltip=[alt.Tooltip("fam:N", title="Familia"), alt.Tooltip("motivo_corto:N", title="Decisión"), alt.Tooltip("n:Q", title="Variables")])
+        .properties(title="Decisión por familia"), width="stretch", height=420)
+    nota("Lo que más se elimina son **documentos casi nunca entregados** (varianza nula) y las **medidas de vivienda e historial "
+         "mensual del buró** con 55–72 % de nulos y Gini bajo. Ojo con el caso contrario: `HC_CARD_MAX_UTILIZACION` tiene 72 % de nulos "
+         "pero **se conserva**, porque «no tener tarjeta» separa el riesgo (Gini 0.097). Un nulo no es malo por sí mismo.")
+
+    st.markdown("**Decisión por variable**")
+    sel_d = st.multiselect("Filtrar", DOM, default=["Agrupada por tasa de default", "Elimina · nulos sin poder", "Elimina · varianza casi nula",
+                                                     "Pasa · nulo informativo"], key="f_uni")
+    vf = fu[fu["motivo_corto"].isin(sel_d)] if sel_d else fu
+    st.dataframe(vf.sort_values(["motivo_corto", "variable"])[["variable", "tipo", "familia", "pct_nulos", "pct_dominante", "gini", "motivo_corto", "motivo"]]
+                 .assign(familia=lambda d: d["familia"].map(fam_corta)), hide_index=True, width="stretch", height=380,
+                 column_config={"variable": st.column_config.TextColumn("Variable", pinned=True, width=230),
+                                "tipo": st.column_config.TextColumn("Tipo", width=90), "familia": st.column_config.TextColumn("Familia", width=170),
+                                "pct_nulos": st.column_config.ProgressColumn("% nulos", format="percent", min_value=0, max_value=1, width=110),
+                                "pct_dominante": st.column_config.NumberColumn("% valor dominante", format="percent", width=110),
+                                "gini": st.column_config.NumberColumn("Gini", format="%.3f", width=70),
+                                "motivo_corto": st.column_config.TextColumn("Decisión", width=190),
+                                "motivo": st.column_config.TextColumn("Detalle", width=420)})
+
+    st.markdown("#### Agrupación por tasa de default (alta cardinalidad)")
+    vg = st.segmented_control("Variable", sorted(gr["variable"].unique()), default=sorted(gr["variable"].unique())[0], key="var_gr")
+    g = gr.query("variable == @vg").copy()
+    resumen_g = g.groupby("grupo", as_index=False).agg(n=("n_grupo", "first"), rd=("rd_grupo", "first"), categorias=("categoria", "count"))
+    resumen_g = resumen_g.sort_values("rd")
+    orden_g = resumen_g["grupo"].tolist()
+    q1, q2 = st.columns([2, 3], gap="large")
+    base_g = alt.Chart(resumen_g).encode(x=alt.X("grupo:N", sort=orden_g, title=None, axis=alt.Axis(labelAngle=0)))
+    barras = base_g.mark_bar(color="#c9c8c3", width={"band": 0.75}).encode(
+        y=alt.Y("n:Q", title="Créditos (train)", axis=alt.Axis(titleColor=GRIS)),
+        tooltip=[alt.Tooltip("grupo:N"), alt.Tooltip("n:Q", format=","), alt.Tooltip("categorias:Q", title="Categorías")])
+    linea = base_g.mark_line(color=AZUL, strokeWidth=2.5, point=alt.OverlayMarkDef(size=80, filled=True, color=AZUL)).encode(
+        y=alt.Y("rd:Q", title="Tasa de default", axis=alt.Axis(format="%", titleColor=AZUL)),
+        tooltip=[alt.Tooltip("grupo:N"), alt.Tooltip("rd:Q", format=".2%", title="Default")])
+    q1.altair_chart(alt.layer(barras, linea).resolve_scale(y="independent").properties(
+        title={"text": f"{vg}: grupos resultantes", "subtitle": f"{g['categoria'].nunique()} categorías → {len(resumen_g)} grupos"}),
+        width="stretch", height=340)
+    g["grupo"] = pd.Categorical(g["grupo"], categories=orden_g, ordered=True)
+    q2.altair_chart(alt.Chart(g[g["n"] > 0]).mark_circle(opacity=0.85, stroke="white").encode(
+        x=alt.X("rd:Q", title="Tasa de default de la categoría", axis=PCT),
+        y=alt.Y("grupo:N", sort=orden_g, title=None),
+        size=alt.Size("n:Q", title="Créditos", scale=alt.Scale(range=[20, 900]), legend=None),
+        color=alt.Color("grupo:N", sort=orden_g, scale=alt.Scale(scheme="blues"), legend=None),
+        tooltip=[alt.Tooltip("categoria:N", title="Categoría"), alt.Tooltip("grupo:N"), alt.Tooltip("n:Q", format=","),
+                 alt.Tooltip("rd:Q", format=".2%", title="Default categoría"), alt.Tooltip("rd_grupo:Q", format=".2%", title="Default grupo")])
+        .properties(title={"text": "Cada categoría en su grupo", "subtitle": "Tamaño = créditos; pase el cursor para ver la categoría"}),
+        width="stretch", height=340)
+    with st.expander("Composición de cada grupo", icon=":material/list:"):
+        comp = g.groupby("grupo", observed=True).agg(rd=("rd_grupo", "first"), n=("n_grupo", "first"),
+                                                       categorias=("categoria", lambda x: ", ".join(sorted(x)))).reset_index()
+        tabla_texto(comp.rename(columns={"grupo": "Grupo", "rd": "Default", "n": "Créditos", "categorias": "Categorías"}),
+                    {"Default": "{:.2%}", "Créditos": "{:,}"})
+    st.caption("Ejemplo de lectura de `ORGANIZATION_TYPE`: `XNA` (sin empleador, sobre todo pensionistas) cae en el grupo de menor "
+               "default junto a bancos, policía y universidades; construcción, limpieza y restaurantes, en el de mayor. El nulo de "
+               "`OCCUPATION_TYPE` queda como grupo propio «Sin dato».")
 
 st.divider()
 st.caption("Fuente: `artifacts/tablon_general.parquet` (ex-ante) y `artifacts/tablon_tratado.parquet` (ex-post). Metodología del "

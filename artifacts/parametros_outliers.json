@@ -1,14 +1,27 @@
 {
-  "percentiles": {
-    "AMT_INCOME_TOTAL": 99.9,
-    "CNT_CHILDREN": 99.9,
-    "CNT_FAM_MEMBERS": 99.9,
-    "OBS_30_CNT_SOCIAL_CIRCLE": 99.9,
-    "OBS_60_CNT_SOCIAL_CIRCLE": 99.9,
-    "AMT_REQ_CREDIT_BUREAU_QRT": 99.9,
-    "OWN_CAR_AGE": 95
+  "metodo": "Reasignación por tasa de default: los valores > umbral se llevan al tramo cuya tasa de default es estadísticamente similar (IC 95 % de Wilson) y que, al recibirlos, no mueve su tasa más de 0.5 p.p.; entre los compatibles, el más cercano al umbral. Aprendido solo con train.",
+  "aprendido_en": "train",
+  "semilla_particion": 42,
+  "test_size": 0.3,
+  "umbrales": {
+    "AMT_INCOME_TOTAL": 900000.0,
+    "CNT_CHILDREN": 4.0,
+    "CNT_FAM_MEMBERS": 6.0,
+    "OBS_30_CNT_SOCIAL_CIRCLE": 17.0,
+    "OBS_60_CNT_SOCIAL_CIRCLE": 16.0,
+    "AMT_REQ_CREDIT_BUREAU_QRT": 4.0,
+    "OWN_CAR_AGE": 63.0
   },
-  "topes": {
+  "valores_asignados": {
+    "AMT_INCOME_TOTAL": 405000.0,
+    "CNT_CHILDREN": 4.0,
+    "CNT_FAM_MEMBERS": 6.0,
+    "OBS_30_CNT_SOCIAL_CIRCLE": 12.0,
+    "OBS_60_CNT_SOCIAL_CIRCLE": 12.0,
+    "AMT_REQ_CREDIT_BUREAU_QRT": 4.0,
+    "OWN_CAR_AGE": 16.0
+  },
+  "topes_anteriores": {
     "AMT_INCOME_TOTAL": 900000.0,
     "CNT_CHILDREN": 4.0,
     "CNT_FAM_MEMBERS": 6.0,

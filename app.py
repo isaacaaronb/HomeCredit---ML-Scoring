@@ -18,9 +18,11 @@ PAGINAS = {
     "Análisis exploratorio": [
         st.Page("pages/3_EDA_univariado.py", title="EDA univariado", icon=":material/bar_chart:"),
         st.Page("pages/4_EDA_bivariado.py", title="EDA bivariado", icon=":material/compare_arrows:"),
+        st.Page("pages/5_EDA_multivariado.py", title="EDA multivariado", icon=":material/hub:"),
     ],
     "Modelamiento": [
-        st.Page("pages/5_Modelos.py", title="Modelos", icon=":material/model_training:"),
+        st.Page("pages/6_Dataset_final.py", title="Dataset final", icon=":material/dataset:"),
+        st.Page("pages/7_Modelos.py", title="Modelos", icon=":material/model_training:"),
     ],
 }
 

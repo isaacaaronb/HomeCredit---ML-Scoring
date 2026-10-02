@@ -1,0 +1,7 @@
+# Dependencias extra para regenerar los artefactos de modelado (no las necesita la app en Streamlit Cloud).
+#   pip install -r requirements-pipeline.txt
+#   python scripts/pipeline_modelado.py todo
+-r requirements.txt
+scikit-learn==1.9.1
+imbalanced-learn==0.14.2
+optbinning==1.0.0

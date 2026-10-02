@@ -146,10 +146,10 @@ ETAPAS = [
     ("Construcción del tablón", "Traducción a SQL (DuckDB) de la lógica oficial; reproduce la base oficial con 0 diferencias en sus 148 columnas.", "green", "Completado"),
     ("Análisis estadístico inicial (descriptivo)", "Separación de variables numéricas, categóricas y dicotómicas; métricas de forma, colas y valores centinela.", "green", "Completado"),
     ("Análisis de calidad (diagnóstico)", "Nulos estructurales vs. informativos, centinelas (p. ej. `DAYS_EMPLOYED = 365243`), outliers y alertas por variable.", "green", "Completado"),
-    ("Preprocesamiento", "Imputación por reglas (mediana por grupo, moda), indicadores de ausencia y topes por percentil (p95 / p99 / p99.9).", "orange", "En revisión"),
-    ("EDA univariado", "Distribuciones, ajuste de distribuciones teóricas, boxplots y Q-Q por variable.", "green", "Completado"),
-    ("EDA bivariado vs. TARGET", "Tasa de default por tramos (`qcut`, 5 bins) y *binning* supervisado con OptBinning (WoE).", "gray", "Pendiente"),
-    ("Selección de variables", "Filtro por *Information Value* (IV > 0.05) y control de redundancia con Spearman (|ρ| > 0.80).", "gray", "Pendiente"),
+    ("Preprocesamiento", "Imputación por reglas (mediana por grupo, moda), indicadores de ausencia y reasignación de outliers al tramo con tasa de default similar (aprendida en train).", "green", "Completado"),
+    ("EDA univariado", "Distribuciones, ajuste de distribuciones teóricas, boxplots y Q-Q; filtro por varianza, nulos y cardinalidad.", "green", "Completado"),
+    ("EDA bivariado vs. TARGET", "Tasa de default por tramos (`qcut` 5 y OptBinning); IV ≥ 0.1 para la logística y Gini ≥ 0.08 para ML.", "green", "Completado"),
+    ("EDA multivariado y dataset final", "Redundancia con Spearman (|ρ| > 0.6); dataset logístico en WoE y dataset ML con SMOTE en train.", "green", "Completado"),
     ("Modelos", "Regresión logística sobre WoE (referencia), árbol de decisión y Random Forest.", "gray", "Pendiente"),
     ("Evaluación e interpretación", "Matriz de confusión, curvas ROC / AUC, exactitud por clase e importancia de variables.", "gray", "Pendiente"),
 ]
@@ -170,9 +170,11 @@ with n2, st.container(border=True):
     st.markdown("**Análisis exploratorio**")
     st.page_link("pages/3_EDA_univariado.py", label="EDA univariado", icon=":material/bar_chart:")
     st.page_link("pages/4_EDA_bivariado.py", label="EDA bivariado", icon=":material/compare_arrows:")
+    st.page_link("pages/5_EDA_multivariado.py", label="EDA multivariado", icon=":material/hub:")
 with n3, st.container(border=True):
     st.markdown("**Modelamiento**")
-    st.page_link("pages/5_Modelos.py", label="Modelos", icon=":material/model_training:")
+    st.page_link("pages/6_Dataset_final.py", label="Dataset final", icon=":material/dataset:")
+    st.page_link("pages/7_Modelos.py", label="Modelos", icon=":material/model_training:")
     st.page_link(URL_REPO, label="Código en GitHub", icon=":material/code:")
 
 # ── Pie ────────────────────────────────────────────────────────────────────────

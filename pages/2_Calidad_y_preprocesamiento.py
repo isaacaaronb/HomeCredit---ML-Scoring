@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -63,7 +64,7 @@ k1.metric("Variables con nulos", f"{(cal.n_nulos > 0).sum()}", border=True, help
 k2.metric("Celdas nulas", f"{R['celdas_nulas_antes'] / (N * R['columnas']):.1%}", border=True,
           help=f"{R['celdas_nulas_antes']:,} de {N * R['columnas']:,} celdas del tablón oficial.")
 k3.metric("Variables imputadas", "15", border=True, help="12 numéricas + 3 categóricas; más el centinela de DAYS_EMPLOYED.")
-k4.metric("Variables topeadas", f"{len(t('plan_topes'))}", border=True, help="Winsorización superior por percentil (p95 / p99.9).")
+k4.metric("Outliers reasignados", f"{len(t('plan_outliers'))} variables", border=True, help="Reasignación al tramo con tasa de default similar (aprendida en train).")
 val = t("validaciones")
 k5.metric("Validaciones OK", f"{val.ok.sum()}/{len(val)}", border=True, help="Chequeos automáticos del preprocesamiento.")
 
@@ -157,7 +158,7 @@ with tab_diag:
                                                                                     min_value=0, max_value=0.3),
                                 "pct_ceros": st.column_config.ProgressColumn("% ceros", format="percent", min_value=0, max_value=1)})
     st.caption("Tabla de colas pedida por la guía (mín, p1, p50, p99, máx). Un outlier estadístico no es un error: la decisión de "
-               "topear se toma en la pestaña **Outliers** con evidencia de riesgo.")
+               "tratarlo se toma en la pestaña **Outliers** con evidencia de riesgo.")
 
     st.subheader("Categóricas: cardinalidad, categorías raras y valores inesperados")
     cat = t("categoricas")
@@ -449,25 +450,31 @@ with tab_na:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_out:
     st.markdown(
-        "Un valor extremo no se corrige por ser extremo. El criterio es de **riesgo**: se topea una cola solo si **no aporta una "
-        "señal distinta a la del tramo previo**. Para cada variable se comparan tres topes candidatos (p95, p99, p99.9) con tres "
-        "evidencias: la tasa de default por tramo de cola, un test χ² de homogeneidad (cola vs. tramo previo) y el cambio en la "
-        "log-verosimilitud y el AUC de una logística univariada. El análisis se hace sobre el tablón **ya imputado**."
+        "Un valor extremo no se corrige por ser extremo: el criterio es de **riesgo**. La corrección se hace en dos pasos y "
+        "**solo con train** (partición 70/30 estratificada, semilla 42), porque usa el `TARGET`:\n\n"
+        "1. **Detección.** Dónde están las colas y si su tasa de default se parece a la del tramo previo.\n"
+        "2. **Reasignación por tasa de default.** El valor atípico **no se lleva al tope**, sino al **tramo cuya tasa de default "
+        "es estadísticamente similar** a la de los atípicos."
     )
-    incluir = st.toggle("Incluir variables candidatas del tablón oficial (pendientes de decisión)", key="cand",
-                        help="BUREAU_* y HC_* con colas largas. Se muestra la misma evidencia para decidir sus topes; hoy no se topean.")
-    estados = ["Topeada", "Candidata (pendiente)"] if incluir else ["Topeada"]
-    colas = t("colas").query("estado in @estados")
+    with st.container(border=True):
+        st.markdown(
+            ":orange-badge[Corrección tras el feedback del asistente de docencia] Antes se topeaba (*winsorización*): todo lo "
+            "que superaba el percentil se llevaba al tope. Eso **infla la tasa de default del tramo que recibe los atípicos**. "
+            "El ejemplo es `OWN_CAR_AGE`: llevar los autos de 64–65 y 91 años (imposibles) a 30 años subía el default de los "
+            "autos de 30 años de **6.0 % a 8.8 %**, una distorsión que no existe en los datos. Ahora cada grupo de atípicos va a un "
+            "tramo con su misma tasa: la variable conserva la información que aporta.")
 
-    st.subheader("Dónde están las colas")
+    st.subheader("Paso 1 · Detección: dónde están las colas")
+    incluir = st.toggle("Incluir las variables de historial con colas largas (no se tratan)", key="cand",
+                        help="BUREAU_* y HC_*: su cola tiene una tasa de default distinta a la del tramo previo; tratarla borraría señal.")
+    estados = ["Tratada", "Candidata (sin tratar)"] if incluir else ["Tratada"]
+    colas = t("colas").query("estado in @estados")
     st.dataframe(colas, hide_index=True, width="stretch", height=38 + 35 * len(colas),
                  column_config={"variable": st.column_config.TextColumn("Variable", width=240),
                                 "estado": st.column_config.TextColumn("Estado", width=170),
                                 **{c: st.column_config.NumberColumn(c, format="compact") for c in ["mediana", "p95", "p99", "p99.9", "max"]},
                                 "max_sobre_p999": st.column_config.NumberColumn("Máx / p99.9", format="%.1f",
                                                                                 help="Cuántas veces supera el máximo al percentil 99.9.")})
-
-    st.subheader("Tasa de default por tramo de cola")
     dc = t("default_por_cola").query("estado in @estados").copy()
     dc["fiable"] = dc["n"].ge(300).map({True: "n ≥ 300", False: "n < 300 (poco fiable)"})
     dc["etiqueta"] = dc.apply(lambda r: "sin casos" if r.n == 0 else ("n < 20" if pd.isna(r.tasa) else f"{r.tasa:.1%}"), axis=1)
@@ -487,43 +494,108 @@ with tab_out:
         paneles.append((barra + texto + regla_base(BASE, "y")).properties(title=v, width=195, height=170))
     filas_p = [alt.hconcat(*paneles[i:i + 4]) for i in range(0, len(paneles), 4)]
     st.altair_chart(alt.vconcat(*filas_p).configure_title(fontSize=11, anchor="start"), width="content")
-    st.caption(f"Línea naranja: tasa base {BASE:.1%}. Créditos por tramo en el tooltip. Si la cola extrema tiene un default parecido al del tramo previo, topearla "
-               "no destruye información; si es distinto, el tope borraría una señal real.")
+    st.caption(f"Tasa de default por tramo de cola en train. Línea naranja: tasa base {BASE:.1%}. En las variables de atraso "
+               "(si se activa el interruptor) la cola tiene **más** default que el resto: es señal de riesgo, no error, y no se toca.")
 
-    st.subheader("¿La cola por encima del tope se comporta distinto al tramo previo?")
-    ev = t("evidencia_topes").query("estado in @estados").copy()
-    ev["resultado"] = ev["p_valor"].apply(lambda p: "n/d" if pd.isna(p) else ("Homogénea (p ≥ 0.05)" if p >= 0.05 else "Difiere (p < 0.05)"))
-    ev["texto"] = ev.apply(lambda r: f"n/d · n={r.n_afectados:,}" if pd.isna(r.p_valor) else
-                           (f"p<0.001 · n={r.n_afectados:,}" if r.p_valor < 0.001 else f"p={r.p_valor:.3f} · n={r.n_afectados:,}"), axis=1)
-    ev["tope_en"] = "tope en p" + ev["percentil"].map(lambda p: f"{p:g}")
-    base_h = alt.Chart(ev).encode(x=alt.X("tope_en:N", title=None, axis=alt.Axis(orient="top", labelAngle=0)),
-                                  y=alt.Y("variable:N", sort=colas["variable"].tolist(), title=None, axis=alt.Axis(labelLimit=240)))
-    calor = base_h.mark_rect(stroke="white", strokeWidth=2).encode(
-        color=alt.Color("resultado:N", scale=alt.Scale(domain=["Homogénea (p ≥ 0.05)", "Difiere (p < 0.05)", "n/d"],
-                                                       range=["#b5e4d2", "#f6c8b3", "#dcdcd8"]), legend=alt.Legend(orient="bottom", title=None,
-                                                       labelLimit=420, labelExpr="datum.value == 'n/d' ? 'n/d: tramo previo vacío (variable discreta) o < 20 casos' : datum.label")),
-        tooltip=[alt.Tooltip("variable:N"), alt.Tooltip("tope_en:N", title="Tope"), alt.Tooltip("tope:Q", format=",.4g"),
-                 alt.Tooltip("p_valor:Q", format=".4f", title="p-valor χ²"), alt.Tooltip("n_afectados:Q", format=",", title="Afectados"),
-                 alt.Tooltip("delta_logL:Q", format=".2f", title="Δ logL"), alt.Tooltip("delta_AUC:Q", format="+.4f", title="Δ AUC")])
-    st.altair_chart((calor + base_h.mark_text(fontSize=11, color="#222").encode(text="texto:N")).properties(height=34 * len(colas) + 40),
-                    width="stretch")
-    st.caption("Cada celda compara la tasa de default de los créditos **por encima** del tope (n = afectados) con la del tramo "
-               "inmediatamente anterior (test χ²). Verde: la cola se comporta como el tramo previo, así que topear no borra señal. "
-               "Salmón: la cola es distinta y el tope borraría información de riesgo real.")
-    with st.expander("Evidencia completa por variable y percentil", icon=":material/table_view:"):
-        st.dataframe(ev[["variable", "percentil", "tope", "n_afectados", "pct_no_nulos", "default_tramo_previo", "default_cola",
-                         "p_valor", "delta_logL", "delta_AUC"]], hide_index=True, width="stretch", height=420,
-                     column_config={"variable": st.column_config.TextColumn("Variable", pinned=True, width=230),
-                                    "percentil": st.column_config.NumberColumn("Percentil", format="%.1f"),
-                                    "tope": st.column_config.NumberColumn("Tope", format="compact"),
-                                    "n_afectados": st.column_config.NumberColumn("Afectados", format="localized"),
-                                    "pct_no_nulos": st.column_config.NumberColumn("% no nulos", format="percent"),
-                                    "default_tramo_previo": st.column_config.NumberColumn("Default tramo previo", format="percent"),
-                                    "default_cola": st.column_config.NumberColumn("Default cola", format="percent"),
-                                    "p_valor": st.column_config.NumberColumn("p-valor χ²", format="%.4f"),
-                                    "delta_logL": st.column_config.NumberColumn("Δ logL", format="%.2f",
-                                                                                help="> 0: la logística univariada ajusta mejor con el tope."),
-                                    "delta_AUC": st.column_config.NumberColumn("Δ AUC", format="%.4f")})
+    with st.expander("Evidencia estadística por percentil (χ², Δ logL, Δ AUC)", icon=":material/table_view:"):
+        ev = t("evidencia_topes").query("estado in @estados").copy()
+        ev["resultado"] = ev["p_valor"].apply(lambda p: "n/d" if pd.isna(p) else ("Homogénea (p ≥ 0.05)" if p >= 0.05 else "Difiere (p < 0.05)"))
+        ev["texto"] = ev.apply(lambda r: f"n/d · n={r.n_afectados:,}" if pd.isna(r.p_valor) else
+                               (f"p<0.001 · n={r.n_afectados:,}" if r.p_valor < 0.001 else f"p={r.p_valor:.3f} · n={r.n_afectados:,}"), axis=1)
+        ev["corte"] = "cola sobre p" + ev["percentil"].map(lambda p: f"{p:g}")
+        base_h = alt.Chart(ev).encode(x=alt.X("corte:N", title=None, axis=alt.Axis(orient="top", labelAngle=0)),
+                                      y=alt.Y("variable:N", sort=colas["variable"].tolist(), title=None, axis=alt.Axis(labelLimit=240)))
+        calor = base_h.mark_rect(stroke="white", strokeWidth=2).encode(
+            color=alt.Color("resultado:N", scale=alt.Scale(domain=["Homogénea (p ≥ 0.05)", "Difiere (p < 0.05)", "n/d"],
+                                                           range=["#b5e4d2", "#f6c8b3", "#dcdcd8"]), legend=alt.Legend(orient="bottom", title=None)),
+            tooltip=[alt.Tooltip("variable:N"), alt.Tooltip("corte:N", title="Corte"), alt.Tooltip("tope:Q", format=",.4g", title="Valor del percentil"),
+                     alt.Tooltip("p_valor:Q", format=".4f", title="p-valor χ²"), alt.Tooltip("n_afectados:Q", format=",", title="Créditos en la cola")])
+        st.altair_chart((calor + base_h.mark_text(fontSize=11, color="#222").encode(text="texto:N")).properties(height=34 * len(colas) + 40),
+                        width="stretch")
+        st.caption("Compara la tasa de default de la cola (por encima del percentil) con la del tramo inmediatamente anterior. "
+                   "Es la evidencia que fijó el **umbral de detección** (p99.9) de seis variables.")
+
+    st.subheader("Paso 2 · Reasignación por tasa de default")
+    st.markdown(
+        "Para cada variable, los valores **por encima del umbral** forman un grupo; se calcula su tasa de default en train y su "
+        "intervalo de confianza al 95 % (Wilson). El destino es un tramo de valores normales (cada valor en las discretas, 20 "
+        "cuantiles en `AMT_INCOME_TOTAL`) que cumpla tres condiciones:\n\n"
+        "- su tasa de default está **dentro del intervalo** de los atípicos (no se distinguen estadísticamente);\n"
+        "- al recibir a los atípicos su tasa **no se mueve más de 0.5 p.p.** (la crítica del asistente, convertida en regla);\n"
+        "- entre los que cumplen, el **más cercano al umbral**, para respetar el orden de la variable."
+    )
+    pl = t("plan_outliers")
+    dist = pd.concat([
+        pl.assign(metodo="Tope anterior", antes=pl["rd_tramo_tope_antes"], despues=pl["rd_tramo_tope_despues"]),
+        pl.assign(metodo="Reasignación", antes=pl["rd_destino_antes"], despues=pl["rd_destino_despues"]),
+    ])
+    dist["desplazamiento"] = (dist["despues"] - dist["antes"]) * 100
+    dist["tramo"] = np.where(dist["metodo"] == "Tope anterior", dist["tramo_tope"], dist["tramo_destino"])
+    d1, d2 = st.columns([3, 2], gap="large")
+    d1.altair_chart((alt.Chart(dist).mark_bar(height={"band": 0.8}).encode(
+        y=alt.Y("variable:N", sort=pl["variable"].tolist(), title=None, axis=alt.Axis(labelLimit=240)),
+        yOffset=alt.YOffset("metodo:N", sort=["Tope anterior", "Reasignación"]),
+        x=alt.X("desplazamiento:Q", title="Cambio en la tasa de default del tramo que recibe los atípicos (p.p.)"),
+        color=alt.Color("metodo:N", scale=alt.Scale(domain=["Tope anterior", "Reasignación"], range=[NARANJA, AZUL]),
+                        legend=alt.Legend(orient="top", title=None)),
+        tooltip=[alt.Tooltip("variable:N"), alt.Tooltip("metodo:N", title="Método"), alt.Tooltip("tramo:N", title="Tramo que recibe"),
+                 alt.Tooltip("antes:Q", format=".2%", title="Default antes"), alt.Tooltip("despues:Q", format=".2%", title="Default después"),
+                 alt.Tooltip("desplazamiento:Q", format="+.2f", title="Cambio (p.p.)")])
+        + alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#2b2b29").encode(x="x:Q"))
+        .properties(title="¿Cuánto se distorsiona el tramo que recibe a los atípicos?"), width="stretch", height=340)
+    with d2:
+        st.markdown(
+            "- **`OWN_CAR_AGE`**: el tope llevaba 3,600 autos a «30 años» y subía su default **+2.8 p.p.** La reasignación los "
+            "lleva a **16 años** (8.65 % de default frente a 8.61 % de los atípicos): **−0.02 p.p.**\n"
+            "- **`OBS_30` / `OBS_60_CNT_SOCIAL_CIRCLE`**: el tope inflaba los tramos 17 y 16 (+2.9 y +0.4 p.p.); ahora van a 12.\n"
+            "- En **ingresos, hijos, miembros de la familia y consultas** el tramo del tope ya tenía la misma tasa que los atípicos: "
+            "la reasignación llega al mismo tramo y confirma que ahí el tope no distorsionaba.")
+    tabla_texto(pl.assign(ic=lambda d: d.apply(lambda r: f"{r.ic_bajo:.1%} – {r.ic_alto:.1%}", axis=1))
+                [["variable", "regla", "umbral", "n_atipicos_train", "rd_atipicos", "ic", "tramo_destino", "rd_destino_antes",
+                  "rd_destino_despues", "valor_asignado", "p_valor"]]
+                .rename(columns={"variable": "Variable", "regla": "Umbral de detección", "umbral": "Umbral", "n_atipicos_train": "Atípicos (train)",
+                                 "rd_atipicos": "Default atípicos", "ic": "IC 95 %", "tramo_destino": "Tramo destino",
+                                 "rd_destino_antes": "Default destino", "rd_destino_despues": "Default destino (después)",
+                                 "valor_asignado": "Valor asignado", "p_valor": "p-valor χ²"}),
+                {"Umbral": "{:,.0f}", "Atípicos (train)": "{:,}", "Default atípicos": "{:.2%}", "Default destino": "{:.2%}",
+                 "Default destino (después)": "{:.2%}", "Valor asignado": "{:,.0f}", "p-valor χ²": "{:.3f}"})
+    st.caption("p-valor χ² entre los atípicos y su tramo destino: valores altos confirman que no se distinguen. En test se aplica "
+               "la misma regla con los umbrales y destinos aprendidos en train.")
+
+    st.markdown("**Tasa de default por tramo: original, con el tope anterior y con la reasignación**")
+    tr_o = t("outliers_tramos")
+    var_o = st.selectbox("Variable", pl["variable"].tolist(), index=pl["variable"].tolist().index("OWN_CAR_AGE"), key="var_out")
+    d = tr_o.query("variable == @var_o").copy()
+    d = d[(d["n"] >= 100) | d["es_destino"] | d["es_destino_tope"]]
+    fila = pl.set_index("variable").loc[var_o]
+    largo = pd.concat([d.assign(serie="Original", tasa=d["rd"]), d.assign(serie="Con el tope anterior", tasa=d["rd_tope"]),
+                       d.assign(serie="Con la reasignación", tasa=d["rd_reasignacion"])])
+    orden_t = d["tramo"].tolist()
+    xenc = alt.X("tramo:N", sort=orden_t, title=f"{var_o} (tramos con ≥ 100 casos)", axis=alt.Axis(labelAngle=-45 if len(d) > 15 else 0))
+    banda = alt.Chart(pd.DataFrame({"lo": [fila.ic_bajo], "hi": [fila.ic_alto]})).mark_rect(color=VERDE, opacity=0.12).encode(
+        y=alt.Y("lo:Q"), y2="hi:Q")
+    lineas = alt.Chart(largo).mark_line(point=alt.OverlayMarkDef(size=36, filled=True), strokeWidth=2).encode(
+        x=xenc, y=alt.Y("tasa:Q", title="Tasa de default", axis=PCT),
+        color=alt.Color("serie:N", scale=alt.Scale(domain=["Original", "Con el tope anterior", "Con la reasignación"],
+                                                   range=[GRIS, NARANJA, AZUL]), legend=alt.Legend(orient="top", title=None)),
+        strokeDash=alt.StrokeDash("serie:N", scale=alt.Scale(domain=["Original", "Con el tope anterior", "Con la reasignación"],
+                                                             range=[[2, 2], [6, 3], [1, 0]]), legend=None),
+        tooltip=[alt.Tooltip("tramo:N"), alt.Tooltip("serie:N"), alt.Tooltip("tasa:Q", format=".2%", title="Default"),
+                 alt.Tooltip("n:Q", format=",", title="Créditos (original)")])
+    marcas = alt.Chart(d[d["es_destino"] | d["es_destino_tope"]].assign(
+        rol=lambda x: np.where(x["es_destino"], "Destino de la reasignación", "Destino del tope"),
+        y_marca=lambda x: np.where(x["es_destino"], x["rd_reasignacion"], x["rd_tope"]))).mark_text(dy=-16, fontSize=12, fontWeight="bold").encode(
+        x=xenc, y=alt.Y("y_marca:Q"), text=alt.value("▼"),
+        color=alt.Color("rol:N", scale=alt.Scale(domain=["Destino de la reasignación", "Destino del tope"], range=[AZUL, NARANJA]), legend=None))
+    st.altair_chart(alt.layer(banda, lineas, marcas).resolve_scale(color="independent").properties(title={"text": f"{var_o}: tasa de default por tramo (train)",
+                    "subtitle": f"Banda verde: IC 95 % de los atípicos ({fila.rd_atipicos:.2%}) · ▼ azul: destino de la reasignación · ▼ naranja: destino del tope"}),
+                    width="stretch", height=360)
+    st.altair_chart(alt.Chart(largo[largo["serie"] != "Original"]).mark_bar(opacity=0.85).encode(
+        x=xenc, xOffset=alt.XOffset("serie:N"), y=alt.Y("n_eff:Q", title="Créditos"),
+        color=alt.Color("serie:N", scale=alt.Scale(domain=["Con el tope anterior", "Con la reasignación"], range=[NARANJA, AZUL]), legend=None),
+        tooltip=[alt.Tooltip("tramo:N"), alt.Tooltip("serie:N"), alt.Tooltip("n_eff:Q", format=",", title="Créditos")])
+        .transform_calculate(n_eff="datum.serie == 'Con el tope anterior' ? datum.n_tope : datum.n_reasignacion"),
+        width="stretch", height=170)
 
     st.subheader("Caso especial: la antigüedad del auto")
     oc = t("own_car_age").copy()
@@ -535,25 +607,17 @@ with tab_out:
     o1.altair_chart(alt.Chart(oc).mark_bar(size=24).encode(
         x=alt.X("tramo:N", sort=orden_oc, title="Edad del auto (años)", axis=alt.Axis(labelAngle=0)),
         y=alt.Y("n:Q", scale=alt.Scale(type="log", domainMin=1), title="Créditos (escala log)"), y2=alt.datum(1), color=col_oc,
-        tooltip=[alt.Tooltip("tramo:N"), alt.Tooltip("n:Q", format=",")]).properties(height=280, title="Frecuencia por edad del auto"),
+        tooltip=[alt.Tooltip("tramo:N"), alt.Tooltip("n:Q", format=",")]).properties(height=280, title="Frecuencia por edad del auto (train)"),
         width="stretch")
     o2.altair_chart((alt.Chart(oc.dropna(subset=["tasa"])).mark_line(point=alt.OverlayMarkDef(size=60, filled=True), color="#333").encode(
         x=alt.X("tramo:N", sort=orden_oc, title="Edad del auto (años)", axis=alt.Axis(labelAngle=0)),
         y=alt.Y("tasa:Q", title="Tasa de default", axis=PCT, scale=alt.Scale(zero=True)),
         tooltip=[alt.Tooltip("tramo:N"), alt.Tooltip("tasa:Q", format=".2%", title="Default")]) + regla_base(BASE, "y"))
         .properties(height=280, title="Default por edad del auto (tramos con ≥ 100 casos)"), width="stretch")
-    nota("Hay un **bloque anómalo de autos de 64–65 años** (≈ 3,400 créditos) tras un tramo casi vacío entre 51 y 63 años (24 casos): más que autos de colección, "
-         "parece una **codificación de relleno**. El p99 (64) cae dentro del bloque y no lo corrige; el **p95 (30 años)** lo neutraliza "
-         "con una cola homogénea en riesgo. Es una decisión de **criterio experto**, no solo estadística.", ":material/directions_car:")
-
-    st.subheader("Plan de topes")
-    pt = t("plan_topes").assign(percentil=lambda d: "p" + d["percentil"].map(lambda p: f"{p:g}"))
-    tabla_texto(pt.rename(columns={"variable": "Variable", "percentil": "Percentil", "tope": "Tope", "n_afectados": "Afectados",
-                                   "pct_del_total": "% del total", "criterio": "Criterio"})
-                [["Variable", "Percentil", "Tope", "Afectados", "% del total", "Criterio"]],
-                {"Tope": "{:,.0f}", "Afectados": "{:,}", "% del total": "{:.2%}"})
-    st.caption("Las variables de historial con colas largas (`BUREAU_*`, `HC_*`) no se topean; su evidencia se muestra activando el "
-               "interruptor de arriba. En las de **atraso**, la cola tiende a tener un default mayor que la base: topearlas podría borrar señal de riesgo.")
+    nota("Hay un **bloque anómalo de autos de 64–65 años** (≈ 2,300 créditos en train, más dos de 91 años) tras un tramo casi vacío "
+         "entre 51 y 63: parece una **codificación de relleno**. Su default (8.6 %) se parece al de los autos de 13 a 16 años, no "
+         "al de los de 30. Por eso el umbral aquí es de **negocio** (> 63 años) y el destino, **16 años**: el más cercano al "
+         "umbral con la misma tasa. Los autos de 31 a 63 años, raros pero posibles, ya no se tocan.", ":material/directions_car:")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 4. RESULTADO
@@ -565,8 +629,8 @@ with tab_res:
               delta_color="inverse", border=True, help="Las 148 columnas originales. Los nulos estructurales se conservan a propósito.")
     r3.metric("Nulos por crédito", f"{R['nulos_fila_mediana_post']:.1%}",
               f"{(R['nulos_fila_mediana_post'] - R['nulos_fila_mediana']) * 100:+.1f} p.p.", delta_color="inverse", border=True, help="Mediana del % de variables nulas por crédito.")
-    r4.metric("Valores topeados", f"{int(t('efecto_topes')['n_modificados'].sum()):,}", border=True,
-              help="Suma de valores reemplazados por su tope en las 7 variables.")
+    r4.metric("Valores reasignados", f"{int(t('efecto_outliers')['n_modificados'].sum()):,}", border=True,
+              help="Suma de valores atípicos llevados a su tramo destino en las 7 variables (train + test).")
 
     st.subheader("Validaciones del preprocesamiento")
     v = t("validaciones").copy()
@@ -623,11 +687,11 @@ with tab_res:
         tooltip=[alt.Tooltip("serie:N"), alt.Tooltip("desde:Q", format=".0%"), alt.Tooltip("creditos:Q", format=",")])
         .properties(height=280, title="Nulos por crédito antes y después"), width="stretch")
 
-    st.subheader("Outliers: cola superior antes y después del tope")
-    cv = t("curvas_cola").query("estado == 'Topeada'").melt(id_vars=["variable", "percentil"], value_vars=["antes", "despues"],
+    st.subheader("Outliers: cola superior antes y después de la reasignación")
+    cv = t("curvas_cola").query("estado == 'Tratada'").melt(id_vars=["variable", "percentil"], value_vars=["antes", "despues"],
                                                              var_name="serie", value_name="valor")
     cv["serie"] = cv["serie"].map({"antes": "Antes", "despues": "Después"})
-    topes = t("plan_topes").set_index("variable")
+    topes = t("efecto_outliers").set_index("variable")
     paneles = []
     for var in topes.index:
         d = cv.query("variable == @var")
@@ -638,37 +702,42 @@ with tab_res:
                                                             domain=[d["valor"].min() * 0.95, d["valor"].max() * 1.05]),
                     axis=alt.Axis(values=sorted({v for v in [0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1e3, 2e3, 5e3, 1e4, 2e4, 5e4,
                                                              1e5, 2e5, 5e5, 1e6, 1e7, 1e8]
-                                                 if d["valor"].min() * 0.95 <= v <= d["valor"].max() * 1.05} | {float(tp.tope)}),
+                                                 if d["valor"].min() * 0.95 <= v <= d["valor"].max() * 1.05} | {float(tp.umbral)}),
                                   labelExpr="datum.value >= 1e6 ? format(datum.value / 1e6, ',') + ' M' : "
                                             "datum.value >= 1e3 ? format(datum.value / 1e3, ',') + ' mil' : format(datum.value, ',')")),
             color=alt.Color("serie:N", scale=alt.Scale(domain=["Antes", "Después"], range=[AZUL, NARANJA]),
                             legend=alt.Legend(orient="top", title=None)),
             strokeDash=alt.StrokeDash("serie:N", scale=alt.Scale(domain=["Antes", "Después"], range=[[1, 0], [6, 4]]), legend=None),
             tooltip=[alt.Tooltip("serie:N"), alt.Tooltip("percentil:Q", format=".2f"), alt.Tooltip("valor:Q", format=",.4g")])
-            .properties(title=f"{var} · tope = {tp.tope:,.0f} (p{tp.percentil:g})", width=265, height=210))
+            .properties(title=f"{var} · > {tp.umbral:,.0f} → {tp.valor_asignado:,.0f}", width=265, height=210))
     filas_p = [alt.hconcat(*paneles[i:i + 3]) for i in range(0, len(paneles), 3)]
     st.altair_chart(alt.vconcat(*filas_p).configure_title(fontSize=11, anchor="start"), width="content")
-    st.caption("Percentiles 90 a 100 en escala symlog. La línea discontinua (después) se separa de la continua solo donde actúa el tope: "
-               "el resto de la distribución queda intacto.")
-    et = t("efecto_topes")
+    st.caption("Percentiles 90 a 100 en escala symlog (train). La línea discontinua (después) se separa de la continua solo en la cola "
+               "reasignada: el resto de la distribución queda intacto. Título: umbral → valor asignado.")
+    et = t("efecto_outliers")
     st.dataframe(et, hide_index=True, width="stretch", height=38 + 35 * len(et),
                  column_config={"variable": st.column_config.TextColumn("Variable", width=230),
-                                "tope": st.column_config.NumberColumn("Tope", format="localized"),
+                                "umbral": st.column_config.NumberColumn("Umbral", format="localized"),
+                                "valor_asignado": st.column_config.NumberColumn("Valor asignado", format="localized"),
                                 "n_modificados": st.column_config.NumberColumn("Modificados", format="localized"),
                                 **{c: st.column_config.NumberColumn(c.replace("_", " ").capitalize(), format="compact")
                                    for c in ["max_antes", "max_despues", "media_antes", "media_despues", "std_antes", "std_despues"]},
                                 "asim_antes": st.column_config.NumberColumn("Asimetría antes", format="%.2f"),
                                 "asim_despues": st.column_config.NumberColumn("Asimetría después", format="%.2f")})
-    nota("El caso más claro es `AMT_INCOME_TOTAL`: con **278** valores topeados (0.09 %), la desviación estándar cae de 237 mil a 92 mil "
-         "y la asimetría de 391.6 a 2.4, sin tocar al 99.9 % de los clientes.")
+    ef_o = t("efecto_outliers").set_index("variable").loc["AMT_INCOME_TOTAL"]
+    nota(f"El caso más claro es `AMT_INCOME_TOTAL`: con **{int(ef_o.n_modificados)}** valores reasignados (0.09 %), la desviación estándar "
+         f"cae de {ef_o.std_antes / 1e3:,.0f} mil a {ef_o.std_despues / 1e3:,.0f} mil y la asimetría de {ef_o.asim_antes:.1f} a "
+         f"{ef_o.asim_despues:.1f}, sin tocar al 99.9 % de los clientes.")
 
-    st.subheader("Qué queda pendiente")
+    st.subheader("Qué pasa después")
     st.markdown(
-        "- **Redundancia**: `flag_sin_buro` / `flag_sin_previas` vs. `TIENE_BUREAU` / `TIENE_HISTORIAL_HOME_CREDIT`.\n"
-        "- **Topes** de las variables de historial del tablón oficial (candidatas en la pestaña Outliers).\n"
-        "- **`OCCUPATION_TYPE`**: 41,019 nulos sin explicación (¿categoría *Faltante*?)."
+        "- **Redundancias** (`flag_sin_buro` vs. `TIENE_BUREAU`, versiones _AVG/_MODE/_MEDI): se resuelven en el **multivariado**.\n"
+        "- **`OCCUPATION_TYPE`**: sus nulos quedan como categoría propia «Sin dato» al agrupar la variable por tasa de default "
+        "(filtro univariado).\n"
+        "- Los modelos de árboles son robustos a outliers y nulos: este tratamiento es deliberadamente **simple** y se concentra en "
+        "no distorsionar la información, no en «limpiar» la distribución."
     )
 
 st.divider()
-st.caption("Fuente: `notebooks/01_eda_univariado.ipynb` (Pasos 2 y 3) y sus salidas (`artifacts/tablon_imputado.parquet`, "
-           "`tablon_tratado.parquet`, parámetros JSON). Tablas precalculadas con `scripts/build_calidad.py`.")
+st.caption("Fuente: `notebooks/01_eda_univariado.ipynb` (Pasos 2 y 3: faltantes) y `scripts/pipeline_modelado.py outliers` "
+           "(reasignación de outliers sobre train). Tablas precalculadas con `scripts/build_calidad.py`.")
