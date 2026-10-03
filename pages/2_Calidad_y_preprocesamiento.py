@@ -11,6 +11,7 @@ REPO_DIR = Path(__file__).resolve().parents[1]
 CAL = REPO_DIR / "artifacts" / "calidad"
 
 AZUL, NARANJA, VERDE, GRIS = "#2a78d6", "#eb6834", "#1baf7a", "#8a8a85"
+BARRA_G = "#c9c8c3"
 COLOR_TIPO = alt.Scale(domain=["Numérica continua", "Numérica discreta", "Dicotómica", "Categórica nominal", "Categórica ordinal"],
                        range=[AZUL, "#7f5fc8", VERDE, NARANJA, "#c98a2b"])
 PCT = alt.Axis(format="%")
@@ -74,7 +75,8 @@ k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Variables con nulos", f"{(cal.n_nulos > 0).sum()}", border=True, help=f"De {len(cal)} variables del tablón oficial.")
 k2.metric("Celdas nulas", f"{R['celdas_nulas_antes'] / (N * R['columnas']):.1%}", border=True,
           help=f"{R['celdas_nulas_antes']:,} de {N * R['columnas']:,} celdas del tablón oficial.")
-k3.metric("Variables imputadas", "15", border=True, help="12 numéricas + 3 categóricas; más el centinela de DAYS_EMPLOYED.")
+k3.metric("Variables imputadas", f"{R['n_imputadas']}", border=True,
+          help="Faltantes despreciables (montos, círculo social, miembros, teléfono) y 3 categóricas; más el centinela de DAYS_EMPLOYED. Los scores externos no se imputan.")
 k4.metric("Filas eliminadas", f"{R['filas_eliminadas']}", border=True,
           help="Valores super extremos (> 3 × p99.9) y escasos (≤ 20 créditos). El resto de las colas se capea en p0.1–p99.9.")
 val = t("validaciones")
@@ -355,33 +357,52 @@ with tab_na:
                     .properties(title=f"{var}: % de nulos por {eje.lower()}", height=200, width=330))
         st.altair_chart(alt.vconcat(alt.hconcat(graf[0], graf[1]), alt.hconcat(graf[2], graf[3])).resolve_scale(y="independent"),
                         width="content")
-        med = t("ext_medianas")
-        var_m = st.segmented_control("Medianas por celda", ["EXT_SOURCE_1", "EXT_SOURCE_3"], default="EXT_SOURCE_1", key="ext_med")
-        dm = med.query("variable == @var_m")
-        dm_ok = dm[dm.n >= 200]
-        base_m = alt.Chart(dm).encode(
-            x=alt.X("ing:N", title="Tipo de ingreso",
-                    axis=alt.Axis(labelAngle=0, labelOverlap=False, labelLimit=130, labelExpr="split(datum.label, ' ')")),
-            y=alt.Y("edad:N", sort=["≤30", "30-40", "40-50", "50-60", ">60"], title="Edad"))
-        mapa = base_m.mark_rect(stroke="white", strokeWidth=1.5).encode(
-            color=alt.condition("datum.n >= 200", alt.Color("mediana:Q", scale=alt.Scale(scheme="blues"), title="Mediana"),
-                                alt.value("#e4e4e0")),
-            tooltip=[alt.Tooltip("edad:N"), alt.Tooltip("ing:N", title="Ingreso"), alt.Tooltip("mediana:Q", format=".3f"),
-                     alt.Tooltip("n:Q", format=",", title="Obs. con dato")])
-        texto = base_m.mark_text(fontSize=11).encode(
-            text=alt.Text("mediana:Q", format=".2f"),
-            color=alt.condition("datum.n >= 200 && datum.mediana > 0.55", alt.value("white"), alt.value("#222")),
-            opacity=alt.condition("datum.n >= 200", alt.value(1), alt.value(0.45)))
+        st.markdown("**¿Qué habría hecho la imputación?** Se reconstruye la mediana por edad × tipo de ingreso (la regla que se usaba "
+                    "antes) para ver a dónde llevaría a los nulos.")
+        var_m = st.segmented_control("Score", ["EXT_SOURCE_1", "EXT_SOURCE_3"], default="EXT_SOURCE_1", key="ext_med") or "EXT_SOURCE_1"
+        en = R["ext_nulos"][var_m]
+        de = t("ext_destino").query("variable == @var_m").copy()
+        de["etq"] = de.apply(lambda r: f"D{int(r.decil)}\n{r.desde:.2f}–{r.hasta:.2f}", axis=1)
+        x_d = alt.X("tramo:N", sort=de["tramo"].tolist(), title="Decil del score (datos observados)", axis=alt.Axis(labelAngle=0))
+        barras_d = alt.Chart(de).mark_bar(color=BARRA_G, width={"band": 0.75}).encode(
+            x=x_d, y=alt.Y("pct_nulos_imputados:Q", title="% de los nulos que caerían ahí", axis=PCT, scale=alt.Scale(domain=[0, 0.5])),
+            tooltip=[alt.Tooltip("tramo:N", title="Decil"), alt.Tooltip("desde:Q", format=".3f"), alt.Tooltip("hasta:Q", format=".3f"),
+                     alt.Tooltip("pct_nulos_imputados:Q", format=".1%", title="% de nulos imputados"),
+                     alt.Tooltip("rd_decil:Q", format=".2%", title="Default del decil")])
+        linea_d = alt.Chart(de).mark_line(color=AZUL, strokeWidth=2.5, point=alt.OverlayMarkDef(color=AZUL, size=60, filled=True)).encode(
+            x=x_d, y=alt.Y("rd_decil:Q", title="Tasa de default del decil", axis=alt.Axis(format="%", titleColor=AZUL),
+                           scale=alt.Scale(domain=[0, max(de["rd_decil"].max(), en["rd_nulos"]) * 1.15])))
+        regla_n = alt.Chart(pd.DataFrame({"y": [en["rd_nulos"]]})).mark_rule(color=NARANJA, strokeDash=[6, 4], strokeWidth=2).encode(
+            y=alt.Y("y:Q", scale=alt.Scale(domain=[0, max(de["rd_decil"].max(), en["rd_nulos"]) * 1.15])))
         g1, g2 = st.columns([3, 2], gap="large")
-        g1.altair_chart((mapa + texto).properties(title=f"{var_m}: mediana por edad × tipo de ingreso"), width="stretch", height=340)
+        g1.altair_chart(alt.layer(barras_d, alt.layer(linea_d, regla_n)).resolve_scale(y="independent").properties(
+            title={"text": f"{var_m}: a qué decil llevaría la imputación a los nulos",
+                   "subtitle": f"Barras: % de los nulos · línea azul: default del decil · punteada naranja: default de los nulos ({en['rd_nulos']:.1%})"}),
+            width="stretch", height=330)
         with g2:
-            st.markdown(f"La mediana global de **{var_m}** es **{dm['mediana_global'].iloc[0]:.3f}**, pero por celda va de "
-                        f"**{dm_ok['mediana'].min():.2f}** a **{dm_ok['mediana'].max():.2f}** (celdas con ≥ 200 casos; las grises usan el respaldo). El nulo depende de la edad y del tipo de "
-                        "ingreso, y el score también: una mediana global sesgaría a los jóvenes hacia arriba y a los mayores "
-                        "hacia abajo.")
-            st.success("**Decisión:** imputar `EXT_SOURCE_1` y `EXT_SOURCE_3` con la **mediana por edad × tipo de ingreso** "
-                       f"(celdas con ≥ 200 observaciones; si no, mediana por tipo de ingreso y luego global). "
-                       "`EXT_SOURCE_2` (0.2 % de nulos) con la mediana global.", icon=":material/check_circle:")
+            st.markdown(
+                f"Los **{en['n_nulos']:,}** nulos de `{var_m}` ({en['pct_nulos']:.0%} de la base) tienen **{en['rd_nulos']:.1%}** de default, "
+                f"más que quienes tienen dato ({en['rd_con_dato']:.1%}). La imputación los repartía en deciles cuyo default promedio es "
+                f"**{en['rd_destino_ponderada']:.1%}**: deciles **sanos**, que al recibirlos verían inflada su tasa de default. Además, "
+                "la mediana por celda concentra miles de créditos en unos pocos valores y crea **picos** (gráfico de abajo).")
+            st.success("**Decisión (03-10-2026):** **no imputar** los tres scores externos. El nulo se conserva y el *binning* "
+                       "(OptBinning) lo trata como un **tramo propio**, con su propio WoE. En la versión del dataset que va a SMOTE "
+                       "(que no acepta nulos) se imputa la mediana de train **junto con un indicador de nulo**, que preserva la señal.",
+                       icon=":material/check_circle:")
+            st.caption(f"`EXT_SOURCE_2` tiene solo {R['ext2_nulos']['n']:,} nulos (default {R['ext2_nulos']['rd']:.1%}, casi el promedio): "
+                       "el efecto era mínimo, pero se aplica la misma regla a los tres scores por coherencia.")
+        he = t("hist_ext").query("variable == @var_m")
+        st.markdown(f"**{var_m}: la imputación por mediana crearía picos** · misma escala en ambos paneles")
+        ymax = float(he["densidad"].max()) * 1.05
+        for serie, color in (("Original, sin nulos", AZUL), ("Si se imputara", NARANJA)):
+            hs = he[he["serie"] == serie]
+            st.altair_chart(alt.Chart(hs).mark_bar(binSpacing=0, color=color).encode(
+                x=alt.X("desde:Q", bin="binned", title="Valor del score" if serie == "Si se imputara" else None,
+                        scale=alt.Scale(domain=[0, 1])), x2="hasta:Q",
+                y=alt.Y("densidad:Q", title="Densidad", scale=alt.Scale(domain=[0, ymax])),
+                tooltip=[alt.Tooltip("desde:Q", format=".2f", title="Desde"), alt.Tooltip("hasta:Q", format=".2f", title="Hasta"),
+                         alt.Tooltip("densidad:Q", format=".2f", title="Densidad")])
+                .properties(title=serie, height=200), width="stretch")
 
     elif sub == "Bloque de vivienda":
         viv = t("vivienda_estado")
@@ -442,8 +463,7 @@ with tab_na:
          "Sin imputar · sin flag", "Aplicado"),
         ("OWN_CAR_AGE", "Estructural", "Sin imputar (ya lo informa FLAG_OWN_CAR)", "Aplicado"),
         ("DAYS_EMPLOYED = 365243", "Centinela", "Reemplazo por 0 · flag_sin_empleo", "Aplicado"),
-        ("EXT_SOURCE_1, EXT_SOURCE_3", "Falta de información", "Mediana por edad × tipo de ingreso", "Aplicado"),
-        ("EXT_SOURCE_2", "Falta de información", "Mediana global", "Aplicado"),
+        ("EXT_SOURCE_1, EXT_SOURCE_2, EXT_SOURCE_3", "Falta de información", "Sin imputar: el nulo es un tramo propio en el WoE", "Aplicado (03-10)"),
         ("Vivienda (47 variables)", "Falta de información (bloque)", "Sin imputar · flag_sin_info_vivienda", "Aplicado"),
         ("OCCUPATION_TYPE", "Mixto (centinela + sin explicación)", "Sin imputar", "Pendiente"),
         ("OBS/DEF_*_CNT_SOCIAL_CIRCLE, CNT_FAM_MEMBERS", "Despreciable", "Moda (CNT_FAM_MEMBERS ≥ hijos + 1)", "Aplicado"),
@@ -452,7 +472,8 @@ with tab_na:
         ("NAME_TYPE_SUITE (nulo), CODE_GENDER 'XNA', NAME_FAMILY_STATUS 'Unknown'", "Despreciable / codificado", "Moda", "Aplicado"),
         ("ORGANIZATION_TYPE = 'XNA'", "Categoría real (sin empleador)", "Se conserva como categoría", "Aplicado"),
     ], columns=["Variables", "Tipo de faltante", "Tratamiento", "Estado"])
-    plan["Estado"] = plan["Estado"].map({"Aplicado": "✔ Aplicado", "Pendiente": "◷ Pendiente de decisión"})
+    plan["Estado"] = plan["Estado"].map({"Aplicado": "✔ Aplicado", "Aplicado (03-10)": "✔ Aplicado (cambio del 03-10)",
+                                         "Pendiente": "◷ Pendiente de decisión"})
     tabla_texto(plan)
     st.caption("`OCCUPATION_TYPE` sigue sin decisión. Nota: `flag_sin_buro` y `flag_sin_previas` son el complemento exacto de "
                "`TIENE_BUREAU` y `TIENE_HISTORIAL_HOME_CREDIT`.")
@@ -631,8 +652,8 @@ with tab_res:
                                     "metodo": st.column_config.TextColumn("Método", width=260),
                                     **{c: st.column_config.NumberColumn(c.replace("_", " ").capitalize(), format="%.4g")
                                        for c in ["media_antes", "media_despues", "std_antes", "std_despues"]}})
-        st.caption("Imputar concentra valores y **reduce la dispersión** (EXT_SOURCE_1: σ 0.211 → 0.184). En `DAYS_EMPLOYED` el "
-                   "'antes' excluye el centinela.")
+        st.caption("Solo se imputan faltantes despreciables (< 0.5 %), por eso medias y dispersiones casi no cambian. En "
+                   "`DAYS_EMPLOYED` el 'antes' excluye el centinela. Los scores externos conservan sus nulos.")
     with f2:
         fl = t("flags")
         st.altair_chart(alt.Chart(fl).mark_bar(color=VERDE, cornerRadiusEnd=3, height={"band": 0.6}).encode(
@@ -643,21 +664,6 @@ with tab_res:
         st.markdown("**Categóricas imputadas con la moda**")
         tabla_texto(t("imputacion_categoricas").rename(columns={"variable": "Variable", "problema": "Problema", "casos": "Casos",
                                                                "reemplazo": "Reemplazo"}), {"Casos": "{:,}"})
-
-    he = t("hist_ext")
-    paneles = []
-    for var in ["EXT_SOURCE_1", "EXT_SOURCE_3"]:
-        d = he.query("variable == @var")
-        paneles.append(alt.Chart(d).mark_bar(opacity=0.55, binSpacing=0).encode(
-            x=alt.X("desde:Q", bin="binned", title="Valor del score"), x2="hasta:Q",
-            y=alt.Y("densidad:Q", stack=None, title="Densidad"),
-            color=alt.Color("serie:N", scale=alt.Scale(domain=["Original, sin nulos", "Tras imputar"], range=[AZUL, NARANJA]),
-                            legend=alt.Legend(orient="top", title=None)),
-            tooltip=[alt.Tooltip("serie:N"), alt.Tooltip("desde:Q", format=".2f"), alt.Tooltip("densidad:Q", format=".2f")])
-            .properties(title=f"{var}: los valores imputados forman picos", height=260, width=440))
-    st.altair_chart(alt.hconcat(*paneles), width="content")
-    st.caption("Cada pico es la mediana de una celda edad × ingreso. Es el costo conocido de imputar con medianas; en el bivariado "
-               "conviene revisar si estos picos distorsionan los tramos (qcut) de estas variables.")
 
     nf = t("nulos_por_fila").melt(id_vars=["desde", "hasta"], var_name="serie", value_name="creditos")
     nf["serie"] = nf["serie"].map({"antes": "Antes", "despues": "Después"})

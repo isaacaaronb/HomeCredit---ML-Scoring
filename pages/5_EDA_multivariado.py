@@ -127,12 +127,16 @@ with tab_par:
             "- **`AMT_CREDIT` sale frente a `AMT_GOODS_PRICE`** (ρ = 0.98): el monto del crédito es casi el precio del bien.\n"
             "- **`HC_N_RECHAZADAS` sale frente a `HC_PROP_SOLICITUDES_RECHAZADAS`**: el conteo y la proporción de rechazos miden lo mismo; "
             "la proporción tiene más IV porque no depende de cuántas solicitudes hizo el cliente.")
-        st.warning(
-            "**Un par para pensar: `EXT_SOURCE_1` ↔ `DAYS_BIRTH` (ρ = −0.79).** En los datos originales (sin imputar) la "
-            "correlación es −0.60; entre los créditos **imputados** sube a −0.95, porque `EXT_SOURCE_1` se imputó con la "
-            "mediana por **grupo de edad** × tipo de ingreso. Parte de la redundancia la creó el preprocesamiento. Con los "
-            "datos originales el par quedaría justo en el umbral, así que la exclusión de `DAYS_BIRTH` es frágil: conviene saberlo.",
-            icon=":material/psychology:")
+        par_eb = p[(p["variable_1"] == "EXT_SOURCE_1") & (p["variable_2"] == "DAYS_BIRTH")]
+        if len(par_eb):
+            rho_eb = float(par_eb["rho"].iloc[0])
+            st.warning(
+                f"**Un par para pensar: `EXT_SOURCE_1` ↔ `DAYS_BIRTH` (ρ = {rho_eb:.3f}).** Ahora que `EXT_SOURCE_1` ya no se imputa, la "
+                "correlación es la de los datos originales (cuando se imputaba con la mediana por grupo de edad llegaba a −0.79: la "
+                f"imputación fabricaba parte de la redundancia). Con |ρ| = {abs(rho_eb):.3f} el par supera el umbral de 0.6 **por "
+                "milésimas**, y además se mide solo sobre el 44 % de créditos que tienen `EXT_SOURCE_1`. La regla excluye "
+                "`DAYS_BIRTH`, pero es la decisión más frágil del filtro: un umbral de 0.61 la conservaría.",
+                icon=":material/psychology:")
 
 with tab_fin:
     f1, f2 = st.columns([3, 2], gap="large")

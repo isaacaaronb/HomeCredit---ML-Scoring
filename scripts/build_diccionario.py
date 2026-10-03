@@ -2,7 +2,7 @@
 
 Entradas (versionadas en el repo):
   - data_dictionary/HomeCredit_diccionario.xlsx   diccionario oficial (definiciones, fuente, subtipo, cálculo)
-  - data_dictionary/variables_metadata.csv        familia, formato y ventana temporal de cada variable (curado)
+  - data_dictionary/variables_metadata.csv        familia (6, por fuente de Home Credit), bloque temático, formato y ventana (curado)
   - data_dictionary/familias.csv                  descripción de negocio de cada familia (curado)
   - artifacts/tablon_general.parquet              tablón oficial (307,511 × 148)
 
@@ -68,7 +68,7 @@ def main() -> None:
         clase = tipo_de_dato(var, str(o["Tipo"]), str(o["Subtipo"]), n_unicos)
         texto = lambda c: "" if pd.isna(o[c]) or str(o[c]).strip() in ("-", "—") else str(o[c]).strip()
         filas.append({
-            "orden": i, "variable": var, "familia": m["familia"],
+            "orden": i, "variable": var, "familia": m["familia"], "bloque": m["bloque"],
             "origen": "Original" if o["Origen"] == "Original" else "Construida",
             "tipo_dato": clase, "formato": m["formato"], "fuente": o["Tabla fuente"], "ventana": m["ventana"],
             "descripcion": texto("Definición"), "lectura": texto("Interpretación / lectura"),

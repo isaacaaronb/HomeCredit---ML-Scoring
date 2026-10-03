@@ -42,7 +42,8 @@ def fam_corta(f) -> str:
 
 def grafico_guia(d: pd.DataFrame, titulo: str, subtitulo: str = "", con_test: bool = False, base: float | None = None,
                  alto: int = 360, etiquetas: bool = True, angulo: int | None = None, compacto: bool = False):
-    """El gráfico de la guía: barras = frecuencia del tramo (eje izquierdo, gris) y línea = proporción de TARGET (eje derecho, azul)."""
+    """El gráfico de la guía, igual para numéricas y categóricas: eje X = tramos (qcut / OptBinning) o categorías;
+    barras = número de créditos del tramo (eje izquierdo, conteo); línea = proporción de TARGET (eje derecho)."""
     d = d.copy()
     d["etq"] = d["rd"].map(lambda x: f"{x:.1%}")
     orden = d["tramo"].tolist()
@@ -56,11 +57,13 @@ def grafico_guia(d: pd.DataFrame, titulo: str, subtitulo: str = "", con_test: bo
                alt.Tooltip("woe:Q", format=".3f", title="WoE"), alt.Tooltip("iv:Q", format=".4f", title="Aporte al IV")]
     marca = alt.MarkDef(type="bar", color=BARRA) if compacto else alt.MarkDef(type="bar", color=BARRA, size=max(14, min(60, 420 // max(len(d), 1))))
     barras = alt.Chart(d, mark=marca).encode(
-        x=x, y=alt.Y("n:Q", title=None if compacto else "Frecuencia (créditos en train)", axis=alt.Axis(titleColor=GRIS, format="~s")), tooltip=tooltip)
+        x=x, y=alt.Y("n:Q", title="Créditos" if compacto else "Número de créditos (conteo, train)",
+                     axis=alt.Axis(titleColor=GRIS, format="~s")), tooltip=tooltip)
     techo = float(max(d["rd"].max(), d["rd_test"].max() if con_test else 0, base or 0)) * 1.25
     esc_y = alt.Scale(domain=[0, techo])
     linea = alt.Chart(d).mark_line(color=AZUL, strokeWidth=2.6, point=alt.OverlayMarkDef(color=AZUL, size=70, filled=True)).encode(
-        x=x, y=alt.Y("rd:Q", title=None if compacto else "Proporción de TARGET (tasa de default)", scale=esc_y, axis=alt.Axis(format="%", titleColor=AZUL)),
+        x=x, y=alt.Y("rd:Q", title="Tasa de default" if compacto else "Proporción de TARGET (tasa de default)", scale=esc_y,
+                     axis=alt.Axis(format="%", titleColor=AZUL)),
         tooltip=tooltip)
     capas_der = [linea]
     if etiquetas:
@@ -71,7 +74,11 @@ def grafico_guia(d: pd.DataFrame, titulo: str, subtitulo: str = "", con_test: bo
             x=x, y=alt.Y("rd_test:Q", scale=esc_y), tooltip=tooltip))
     if base is not None:
         capas_der.append(alt.Chart(pd.DataFrame({"b": [base]})).mark_rule(color=GRIS, strokeDash=[2, 3]).encode(y=alt.Y("b:Q", scale=esc_y)))
-    graf = alt.layer(barras, alt.layer(*capas_der)).resolve_scale(y="independent")
+    capas_izq = [barras]
+    if not compacto:
+        capas_izq.append(alt.Chart(d).mark_text(baseline="top", dy=5, color="#5f5e5a", fontSize=10).encode(
+            x=x, y=alt.Y("n:Q"), text=alt.Text("n:Q", format=",")))
+    graf = alt.layer(alt.layer(*capas_izq), alt.layer(*capas_der)).resolve_scale(y="independent")
     return graf.properties(title=alt.TitleParams(titulo, subtitle=subtitulo or "", anchor="start", offset=10),
                            height=alto, padding={"top": 24, "left": 5, "right": 5, "bottom": 5},
                            autosize=alt.AutoSizeParams(type="fit-x", contains="padding"))
@@ -334,8 +341,8 @@ with tab_pat:
             dd = bo.query("variable == @v and n > 0")
             c.altair_chart(grafico_guia(dd, v, f"IV {rr['iv']:.3f} · Gini {rr['gini']:.3f} · {rr['patron']}", base=BASE, alto=190,
                                         etiquetas=False, angulo=-30, compacto=True), width="stretch")
-    st.caption("Mismo gráfico de la guía con los tramos de OptBinning. Barras grises: frecuencia (eje izquierdo); línea azul: "
-               "tasa de default (eje derecho); punteada gris: tasa base. Ejes sin título para ganar espacio.")
+    st.caption("Mismo gráfico de la guía con los tramos de OptBinning. Barras grises: número de créditos (eje izquierdo); línea "
+               "azul: proporción de TARGET (eje derecho); punteada gris: tasa base.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 4. SELECCIÓN

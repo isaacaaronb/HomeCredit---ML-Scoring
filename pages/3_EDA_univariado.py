@@ -83,10 +83,10 @@ ESPERADO = {
     "CNT_FAM_MEMBERS": "Miembros de la familia: conteo con moda en 2 (pareja). Muy concentrado; poca dispersión.",
     "HOUR_APPR_PROCESS_START": "Hora de la solicitud: forma de campana alrededor del mediodía, horario comercial. Es operativa, no "
                                "un atributo del cliente: se espera poca relación con el riesgo.",
-    "EXT_SOURCE_1": "Score externo 1: acotado en [0, 1] y sesgado a la izquierda (más clientes con score alto). Ex-post muestra picos "
-                    "por la imputación con medianas por grupo.",
+    "EXT_SOURCE_1": "Score externo 1: acotado en [0, 1] y sesgado a la izquierda (más clientes con score alto). Tiene 56 % de nulos, "
+                    "que ya no se imputan: la distribución ex-post es la original, sin picos artificiales.",
     "EXT_SOURCE_2": "Score externo 2: sesgado a la izquierda, casi sin nulos; forma consistente con un score de riesgo.",
-    "EXT_SOURCE_3": "Score externo 3: sesgado a la izquierda; ex-post con picos de imputación.",
+    "EXT_SOURCE_3": "Score externo 3: sesgado a la izquierda; 20 % de nulos que se conservan como tales (sin imputar).",
     "OBS_30_CNT_SOCIAL_CIRCLE": "Conteo del círculo social con atraso de 30 días: más de la mitad en 0 y cola larga.",
     "DEF_30_CNT_SOCIAL_CIRCLE": "Incumplimientos en el círculo social: casi todos 0 (89 %). Señal escasa pero potencialmente fuerte.",
     "DAYS_LAST_PHONE_CHANGE": "Días desde el último cambio de teléfono: el 12 % lo cambió el mismo día de la solicitud (valor 0).",

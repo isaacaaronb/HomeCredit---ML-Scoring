@@ -146,7 +146,7 @@ ETAPAS = [
     ("Construcción del tablón", "Traducción a SQL (DuckDB) de la lógica oficial; reproduce la base oficial con 0 diferencias en sus 148 columnas.", "green", "Completado"),
     ("Análisis estadístico inicial (descriptivo)", "Separación de variables numéricas, categóricas y dicotómicas; métricas de forma, colas y valores centinela.", "green", "Completado"),
     ("Análisis de calidad (diagnóstico)", "Nulos estructurales vs. informativos, centinelas (p. ej. `DAYS_EMPLOYED = 365243`), outliers y alertas por variable.", "green", "Completado"),
-    ("Preprocesamiento", "Imputación por reglas (mediana por grupo, moda) e indicadores de ausencia; outliers: valores sin sentido a nulo, filas super extremas eliminadas y capeo p0.1–p99.9 (aprendido en train, partición 80/20).", "green", "Completado"),
+    ("Preprocesamiento", "Imputación solo de faltantes despreciables (moda, mediana, razón de montos) e indicadores de ausencia; los scores externos conservan su nulo (tramo propio en el WoE); outliers: valores sin sentido a nulo, filas super extremas eliminadas y capeo p0.1–p99.9 (aprendido en train, partición 80/20).", "green", "Completado"),
     ("EDA univariado", "Distribuciones, ajuste de distribuciones teóricas, boxplots y Q-Q; filtro por varianza, nulos y cardinalidad.", "green", "Completado"),
     ("EDA bivariado vs. TARGET", "Tasa de default por tramos (`qcut` 5 y OptBinning); criterio único para todos los modelos: IV ≥ 0.05 (el Gini se reporta como información).", "green", "Completado"),
     ("EDA multivariado y dataset final", "Redundancia con Spearman (|ρ| > 0.6, sale la de menor IV); dataset de entrenamiento único en dos versiones: original (logística) y SMOTE (ML).", "green", "Completado"),

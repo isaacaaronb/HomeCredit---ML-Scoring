@@ -332,8 +332,8 @@ def main() -> None:
     nuevas = [c for c in imp.columns if c not in df.columns]
     guardar("flags", pd.DataFrame({"flag": nuevas, "n": [int(imp[c].sum()) for c in nuevas],
                                    "pct": [float(imp[c].mean()) for c in nuevas]}))
-    imputadas = sorted({"EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3", "DAYS_LAST_PHONE_CHANGE", "CNT_FAM_MEMBERS",
-                        "AMT_GOODS_PRICE", "AMT_ANNUITY"} | set(social))
+    EXT = ["EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3"]
+    imputadas = sorted({"DAYS_LAST_PHONE_CHANGE", "CNT_FAM_MEMBERS", "AMT_GOODS_PRICE", "AMT_ANNUITY"} | set(social))
     filas = []
     for c in imputadas + ["DAYS_EMPLOYED"]:
         a, b = df[c], imp[c]
@@ -348,6 +348,7 @@ def main() -> None:
               "AMT_ANNUITY": "AMT_CREDIT × razón mediana por contrato", "DAYS_EMPLOYED": "Centinela 365243 → 0 + flag_sin_empleo"}
     ef["metodo"] = ef["variable"].map(metodo).fillna("Moda")
     guardar("efecto_imputacion", ef)
+    res["n_imputadas"] = len(imputadas) + 3          # numéricas + NAME_TYPE_SUITE, CODE_GENDER, NAME_FAMILY_STATUS
     cats = []
     for c, raro in [("NAME_TYPE_SUITE", None), ("CODE_GENDER", "XNA"), ("NAME_FAMILY_STATUS", "Unknown")]:
         cats.append({"variable": c, "problema": "nulo" if raro is None else f"categoría '{raro}'",
@@ -355,17 +356,41 @@ def main() -> None:
                      "reemplazo": str(imp.loc[df[c].isna() if raro is None else df[c].eq(raro), c].iloc[0])})
     guardar("imputacion_categoricas", pd.DataFrame(cats))
 
+    # Scores externos: la imputación por mediana (edad × tipo de ingreso) se DESCARTÓ el 03-10-2026. Se reconstruye aquí
+    # lo que habría hecho, como evidencia: picos en la distribución y nulos (más riesgosos) cargados en tramos sanos.
+    celda = edad + "|" + ing
     edges = np.linspace(0, 1, 61)
-    filas = []
+    filas, destino, ext_res = [], [], {}
     for c in ["EXT_SOURCE_1", "EXT_SOURCE_3"]:
+        nul = df[c].isna()
+        ok = ~nul
+        g = pd.DataFrame({"v": df.loc[ok, c], "edad": edad[ok], "ing": ing[ok]})
+        cel = g.groupby(["edad", "ing"])["v"].agg(["median", "size"])
+        por_celda = {f"{a_}|{b_}": r["median"] for (a_, b_), r in cel.iterrows() if r["size"] >= N_MIN_GRUPO}
+        hip = df[c].fillna(celda.map(por_celda)).fillna(ing.map(g.groupby("ing")["v"].median())).fillna(df[c].median())
         h_o, _ = np.histogram(df[c].dropna(), bins=edges, density=True)
-        h_i, _ = np.histogram(imp[c], bins=edges, density=True)
-        filas += [{"variable": c, "desde": edges[i], "hasta": edges[i + 1], "serie": s, "densidad": v}
-                  for i in range(60) for s, v in (("Original, sin nulos", h_o[i]), ("Tras imputar", h_i[i]))]
+        h_i, _ = np.histogram(hip, bins=edges, density=True)
+        filas += [{"variable": c, "desde": edges[i], "hasta": edges[i + 1], "serie": s_, "densidad": v}
+                  for i in range(60) for s_, v in (("Original, sin nulos", h_o[i]), ("Si se imputara", h_i[i]))]
+        bordes = np.unique(np.quantile(df.loc[ok, c], np.linspace(0, 1, 11)))
+        bordes[0], bordes[-1] = -np.inf, np.inf
+        dec_obs = pd.cut(df.loc[ok, c], bordes)
+        dec_imp = pd.cut(hip[nul], bordes)
+        rd_dec = df.loc[ok].groupby(dec_obs, observed=False)["TARGET"].mean()
+        pct_imp = dec_imp.value_counts(normalize=True).reindex(rd_dec.index).fillna(0)
+        for i, (iv, rd_) in enumerate(rd_dec.items()):
+            destino.append({"variable": c, "decil": i + 1, "tramo": f"D{i + 1}", "desde": float(max(iv.left, 0)),
+                            "hasta": float(min(iv.right, 1)), "rd_decil": float(rd_), "pct_nulos_imputados": float(pct_imp.iloc[i])})
+        ext_res[c] = {"n_nulos": int(nul.sum()), "pct_nulos": float(nul.mean()), "rd_nulos": float(df.loc[nul, "TARGET"].mean()),
+                      "rd_con_dato": float(df.loc[ok, "TARGET"].mean()),
+                      "rd_destino_ponderada": float((pct_imp.values * rd_dec.values).sum())}
     guardar("hist_ext", pd.DataFrame(filas))
+    guardar("ext_destino", pd.DataFrame(destino))
     res["ext_n_original"] = {c: int(df[c].notna().sum()) for c in ["EXT_SOURCE_1", "EXT_SOURCE_3"]}
+    res["ext_nulos"] = ext_res
+    res["ext2_nulos"] = {"n": int(df["EXT_SOURCE_2"].isna().sum()), "rd": float(df.loc[df["EXT_SOURCE_2"].isna(), "TARGET"].mean())}
 
-    sin_tocar = sum(FAMILIAS_HISTORIAL.values(), []) + consultas + ["OWN_CAR_AGE", "OCCUPATION_TYPE"] + vivienda
+    sin_tocar = sum(FAMILIAS_HISTORIAL.values(), []) + consultas + ["OWN_CAR_AGE", "OCCUPATION_TYPE"] + vivienda + EXT
     cambiaron = {c for c in df.columns if not df[c].equals(imp[c])}
     esperadas = set(imputadas) | {"DAYS_EMPLOYED", "NAME_TYPE_SUITE", "CODE_GENDER", "NAME_FAMILY_STATUS"}
     val = [
@@ -379,6 +404,8 @@ def main() -> None:
          int(imp["flag_sin_buro"].sum()) == int(sin_buro.sum()) and int(imp["flag_sin_previas"].sum()) == int(df["HC_N_SOLICITUDES"].isna().sum())
          and int(imp["flag_sin_empleo"].sum()) == int(es_sent.sum())
          and int(imp["flag_sin_info_vivienda"].sum()) == int(df[vivienda].isna().all(axis=1).sum())),
+        ("Faltantes", "Scores externos sin imputar: conservan todos sus nulos originales",
+         all(imp[c].isna().equals(df[c].isna()) and imp[c].equals(df[c]) for c in EXT)),
         ("Faltantes", "Nulos estructurales, de vivienda y OCCUPATION_TYPE intactos",
          all(int(imp[c].isna().sum()) == int(df[c].isna().sum()) for c in sin_tocar)),
         ("Faltantes", "Valores no nulos originales intactos",

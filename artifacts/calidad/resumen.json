@@ -4,7 +4,7 @@
   "columnas_post": 152,
   "tasa_base": 0.08072881945686496,
   "nulos_fila_mediana": 0.3082191780821918,
-  "nulos_fila_mediana_post": 0.29333333333333333,
+  "nulos_fila_mediana_post": 0.3,
   "ceros_reales_days_employed": 2,
   "consultas_nulas": 41519,
   "consultas_nulas_sin_buro": 41519,
@@ -20,12 +20,33 @@
   "ocupacion_default_sin_explicar": 0.08015797557229576,
   "vivienda_n_vars": 47,
   "vivienda_parcial_mediana_faltantes": 16,
+  "n_imputadas": 11,
   "ext_n_original": {
     "EXT_SOURCE_1": 134133,
     "EXT_SOURCE_3": 246546
   },
+  "ext_nulos": {
+    "EXT_SOURCE_1": {
+      "n_nulos": 173378,
+      "pct_nulos": 0.5638107254699832,
+      "rd_nulos": 0.08519535350505832,
+      "rd_con_dato": 0.07495545466067262,
+      "rd_destino_ponderada": 0.058700093113254345
+    },
+    "EXT_SOURCE_3": {
+      "n_nulos": 60965,
+      "pct_nulos": 0.19825307062186392,
+      "rd_nulos": 0.09311900270647093,
+      "rd_con_dato": 0.07766501991514768,
+      "rd_destino_ponderada": 0.060157929508570185
+    }
+  },
+  "ext2_nulos": {
+    "n": 660,
+    "rd": 0.07878787878787878
+  },
   "celdas_nulas_antes": 11283509,
-  "celdas_nulas_despues": 11044435,
+  "celdas_nulas_despues": 11279403,
   "filas_post": 307460,
   "filas_eliminadas": 51,
   "ingreso_original": {

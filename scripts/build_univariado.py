@@ -287,6 +287,9 @@ def metricas_dicotomica(serie: pd.Series) -> dict:
 
 
 LIMITES: dict = {}
+# Indicadores creados en el preprocesamiento: van a la familia de la fuente cuyo faltante marcan
+FAMILIA_FLAGS = {"flag_sin_buro": "05 · Buró de crédito", "flag_sin_previas": "06 · Historial en Home Credit",
+                 "flag_sin_empleo": "02 · Perfil del solicitante", "flag_sin_info_vivienda": "03 · Vivienda y entorno"}
 
 
 def main() -> None:
@@ -312,8 +315,9 @@ def main() -> None:
             nota = "Creada en el preprocesamiento."
         elif clasificar(post[c]) != clasificar(ante[c]) and c not in FORZAR_TIPO:
             nota = f"Con la regla (≤ {UMBRAL_CAT_NUM} valores) sería «{clasificar(post[c])}» tras el capeo; se mantiene «{tipo}»."
-        familia = dicc.loc[c, "familia"] if c in dicc.index else "14 · Indicadores del preprocesamiento"
-        filas_tipo.append({"variable": c, "tipo": tipo, "familia": familia,
+        familia = dicc.loc[c, "familia"] if c in dicc.index else FAMILIA_FLAGS.get(c, "02 · Perfil del solicitante")
+        bloque = dicc.loc[c, "bloque"] if c in dicc.index else "Indicadores del preprocesamiento"
+        filas_tipo.append({"variable": c, "tipo": tipo, "familia": familia, "bloque": bloque,
                            "tipo_dato": dicc.loc[c, "tipo_dato"] if c in dicc.index else "Dicotómica",
                            "descripcion": dicc.loc[c, "descripcion"] if c in dicc.index else "", "nota_tipo": nota,
                            "orden": int(dicc.loc[c, "orden"]) if c in dicc.index else 1000 + len(filas_tipo)})

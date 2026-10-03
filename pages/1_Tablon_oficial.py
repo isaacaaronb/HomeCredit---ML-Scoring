@@ -64,6 +64,7 @@ COLUMNAS_DICC = {
     "ejemplos": st.column_config.TextColumn("Valores de ejemplo", width="medium"),
     "calculo": st.column_config.TextColumn("Cómo se construye", width="large"),
     "familia": st.column_config.TextColumn("Familia", width=190),
+    "bloque": st.column_config.TextColumn("Bloque", width=170),
     "origen": st.column_config.TextColumn("Origen", width=100),
 }
 
@@ -75,14 +76,17 @@ st.title("Tablón oficial")
 st.markdown(
     "La base de modelización tiene **una fila por crédito objetivo** y reúne en 148 columnas todo lo que se sabe del "
     "solicitante al momento de pedir el crédito: la solicitud misma, su perfil y su historial en el buró y en Home Credit. "
-    "Para leerla con sentido de negocio, las variables se organizan en **14 familias**: cada una responde una pregunta "
-    "distinta sobre el riesgo del solicitante."
+    f"Para leerla con sentido de negocio, las variables explicativas se organizan en **{len(fam) - 1} familias** que siguen las "
+    "fuentes de información de Home Credit: la solicitud (que se separa en el crédito pedido, el perfil del solicitante y su "
+    "entorno), los scores externos, el buró de crédito y el historial en Home Credit. Dentro de cada familia, un **bloque** "
+    "temático conserva el detalle (por ejemplo, *Consultas al buró* dentro de *Buró de crédito*)."
 )
 
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Créditos", f"{n_filas:,}", border=True)
 m2.metric("Variables", f"{len(dicc)}", border=True)
-m3.metric("Familias", f"{len(fam)}", border=True)
+m3.metric("Familias", f"{len(fam) - 1}", border=True,
+          help="Familias de variables explicativas. La 00 · Identificación y objetivo (llave y TARGET) no se cuenta.")
 m4.metric("Construidas", f"{(dicc.origen == 'Construida').sum()}", border=True,
           help=f"Variables agregadas desde las tablas históricas; las otras {(dicc.origen == 'Original').sum()} vienen de application_train.")
 m5.metric("Fill rate promedio", f"{dicc['fill_rate'].mean():.1%}", border=True,
@@ -107,6 +111,7 @@ def ficha_variable(var: str) -> None:
         st.markdown(f"#### `{var}`")
         st.markdown(" ".join([f":{COLOR_TIPO.get(v['tipo_dato'], 'gray')}-badge[{v['tipo_dato']}]",
                               f":gray-badge[{fmt_familia(v['familia'])}]",
+                              f":gray-badge[Bloque: {v['bloque']}]",
                               f":gray-badge[{v['origen']}]"]))
         st.markdown(v["descripcion"])
         a, b = st.columns([3, 2], gap="large")
@@ -170,6 +175,8 @@ with tab_fam:
         with der:
             st.markdown(f"**Pregunta de negocio**  \n*{f['pregunta_negocio']}*")
             st.markdown(f"**Fuente:** `{f['fuente']}`")
+            bloques = vars_f["bloque"].value_counts()
+            st.markdown("**Bloques:** " + " ".join(f":blue-badge[{b} · {n}]" for b, n in bloques.items()))
             tipos = vars_f["tipo_dato"].value_counts()
             st.markdown("**Tipos de dato:** " + " ".join(
                 f":{COLOR_TIPO.get(t, 'gray')}-badge[{t} · {n}]" for t, n in tipos.items()))
@@ -180,7 +187,7 @@ with tab_fam:
                   help=f"Variable con menos datos: {vars_f.loc[vars_f['fill_rate'].idxmin(), 'variable']}")
 
     st.caption(":material/touch_app: Haz clic en una fila para ver la ficha completa de la variable.")
-    elegida_var = tabla_seleccionable(vars_f[["variable", "descripcion", "tipo_dato", "formato", "fill_rate"]],
+    elegida_var = tabla_seleccionable(vars_f[["variable", "bloque", "descripcion", "tipo_dato", "formato", "fill_rate"]],
                                       clave=f"tabla_{elegida[:2]}", alto=min(38 + 35 * len(vars_f), 460))
     if elegida_var:
         ficha_variable(elegida_var)
@@ -199,7 +206,8 @@ with tab_dicc:
     if texto:
         t = texto.strip().lower()
         filtro = filtro[filtro["variable"].str.lower().str.contains(t, regex=False)
-                        | filtro["descripcion"].str.lower().str.contains(t, regex=False)]
+                        | filtro["descripcion"].str.lower().str.contains(t, regex=False)
+                        | filtro["bloque"].str.lower().str.contains(t, regex=False)]
     if sel_fam:
         filtro = filtro[filtro["familia"].isin(sel_fam)]
     if sel_tipo:
@@ -212,7 +220,7 @@ with tab_dicc:
                          file_name="diccionario_tablon.csv", mime="text/csv", icon=":material/download:",
                          width="stretch")
 
-    vista = filtro[["variable", "familia", "descripcion", "tipo_dato", "fill_rate"]].copy()
+    vista = filtro[["variable", "familia", "bloque", "descripcion", "tipo_dato", "fill_rate"]].copy()
     vista["familia"] = vista["familia"].map(fmt_familia)
     if filtro.empty:
         st.info("Ninguna variable coincide con los filtros.", icon=":material/filter_alt_off:")
@@ -229,7 +237,7 @@ with tab_datos:
         "perderte entre 148 columnas; `SK_ID_CURR` y `TARGET` siempre se muestran."
     )
     d1, d2 = st.columns([4, 1.3], vertical_alignment="bottom")
-    por_defecto = [x for x in fam["familia"] if x.startswith(("01", "07", "10", "13"))]
+    por_defecto = [x for x in fam["familia"] if x.startswith(("01", "04", "05"))]
     ver_fam = d1.multiselect("Familias a mostrar", fam["familia"], default=por_defecto, format_func=fmt_familia)
     solo_default = d2.toggle("Solo TARGET = 1", help="Muestra solo los créditos con dificultades de pago.")
 
@@ -261,5 +269,5 @@ with tab_datos:
 
 st.divider()
 st.caption("Fuentes: diccionario oficial del curso (`data_dictionary/HomeCredit_diccionario.xlsx`) y descripción de columnas "
-           "de Kaggle. Familias, formatos y ventanas: elaboración propia (`data_dictionary/familias.csv`, "
+           "de Kaggle. Familias (agrupadas por fuente de Home Credit), bloques, formatos y ventanas: elaboración propia (`data_dictionary/familias.csv`, "
            "`variables_metadata.csv`). El diccionario se regenera con `scripts/build_diccionario.py`.")
