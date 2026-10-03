@@ -1,4 +1,4 @@
-"""EDA bivariado (Pasos 5 y 6.1–6.4 de la guía): relación de cada variable con el TARGET y filtro por IV / Gini."""
+"""EDA bivariado (Pasos 5 y 6.1–6.4 de la guía): relación de cada variable con el TARGET y filtro único por IV ≥ 0.05."""
 from pathlib import Path
 
 import altair as alt
@@ -11,7 +11,7 @@ MOD = REPO_DIR / "artifacts" / "modelado"
 
 AZUL, NARANJA, VERDE, GRIS, TINTA, BARRA = "#2a78d6", "#eb6834", "#1baf7a", "#8a8a85", "#2b2b29", "#c9c8c3"
 PCT = alt.Axis(format="%")
-IV_MIN, IV_SOSP, GINI_MIN, GINI_SOSP = 0.10, 0.50, 0.08, 0.38
+IV_MIN, IV_SOSP, GINI_SOSP = 0.05, 0.50, 0.38
 RANGOS_IV = ["< 0.02 · Not good", "0.02–0.1 · Weak", "0.1–0.3 · Medium", "0.3–0.5 · Strong", "≥ 0.5 · Revisar sobreajuste"]
 RANGOS_GINI = ["< 0.08 · Sin poder", "0.08–0.18 · Débil", "0.18–0.30 · Medio", "0.30–0.38 · Fuerte", "≥ 0.38 · Revisar sobreajuste"]
 COL_RANGO = ["#c9c8c3", "#9db8d9", "#2a78d6", "#1f4e8c", NARANJA]
@@ -89,32 +89,30 @@ st.title("EDA bivariado")
 st.markdown(
     "Cómo se relaciona cada variable con el `TARGET`. Siguiendo la guía, cada variable se **discretiza** y se compara la "
     "**tasa de default por tramo**: `qcut` en 5 tramos para las continuas (Paso 6.1) y *binning* supervisado con **OptBinning** "
-    "(Paso 6.2), que es el que mide el poder predictivo. Todo se aprende **solo con train** (70 %); test (30 %) sirve para "
-    "comprobar que el patrón se repite. Al final, cada variable entra o no a cada dataset: **IV** para la regresión logística y "
-    "**Gini** para los modelos de *machine learning* (Pasos 6.3–6.4)."
+    "(Paso 6.2), que es el que mide el poder predictivo. Todo se aprende **solo con train** (80 %); test (20 %) sirve para "
+    "comprobar que el patrón se repite. El filtro (Pasos 6.3–6.4) usa **un único criterio para todos los modelos: IV ≥ 0.05**, "
+    "porque el entrenamiento parte de **un solo dataset**. El Gini se sigue reportando como información."
 )
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Variables evaluadas", len(bi), border=True, help="Las que pasaron el filtro univariado.")
-k2.metric("Pasan · logística", int(bi["pasa_logistica"].sum()), border=True, help=f"IV ≥ {IV_MIN} (rangos Medium, Strong y ≥ 0.5).")
-k3.metric("Pasan · ML", int(bi["pasa_ml"].sum()), border=True, help=f"Gini ≥ {GINI_MIN}.")
+k2.metric("Pasan (IV ≥ 0.05)", int(bi["pasa"].sum()), border=True, help="Criterio único para la logística y los modelos de ML.")
+k3.metric("IV ≥ 0.1 (Medium o más)", int((bi["iv"] >= 0.1).sum()), border=True, help="Cuántas pasarían con el umbral anterior.")
 k4.metric("IV ≥ 0.5 (revisar)", int((bi["iv"] >= IV_SOSP).sum()), border=True, help="Posible sobreajuste o fuga de información.")
 k5.metric("Inestables train/test", int((~bi["estable"]).sum()), border=True,
-          help="Gini de test < 50 % del de train u orden de los tramos distinto (ρ < 0.5). Se excluyen.")
+          help="Gini de test < 50 % del de train u orden de los tramos distinto (ρ < 0.5). Informativo: ninguna pasa el IV.")
 
 tab_var, tab_rank, tab_pat, tab_sel = st.tabs([":material/bar_chart: Variable vs. TARGET", ":material/leaderboard: Ranking IV y Gini",
-                                               ":material/timeline: Patrones", ":material/fact_check: Selección por dataset"])
+                                               ":material/timeline: Patrones", ":material/fact_check: Selección"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. VARIABLE VS TARGET
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_var:
     f1, f2, f3 = st.columns([5, 3, 4], vertical_alignment="bottom")
-    filtro_ds = f2.segmented_control("Mostrar", ["Todas", "Logística", "ML"], default="Todas", key="ds_var")
+    filtro_ds = f2.segmented_control("Mostrar", ["Todas", "Pasan (IV ≥ 0.05)"], default="Todas", key="ds_var")
     lista = bi.copy()
-    if filtro_ds == "Logística":
-        lista = lista[lista["pasa_logistica"]]
-    elif filtro_ds == "ML":
-        lista = lista[lista["pasa_ml"]]
+    if filtro_ds == "Pasan (IV ≥ 0.05)":
+        lista = lista[lista["pasa"]]
     lista = lista.sort_values("iv", ascending=False)
     ops = lista["variable"].tolist()
     defecto = "EXT_SOURCE_3" if "EXT_SOURCE_3" in ops else ops[0]
@@ -129,12 +127,12 @@ with tab_var:
         st.caption(f"{fam_corta(r['familia'])} · {r['descripcion']}")
 
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("IV (OptBinning)", f"{r['iv']:.3f}", help="Information Value con los tramos de OptBinning en train. Criterio de la logística.")
-    m2.metric("Gini (OptBinning)", f"{r['gini']:.3f}", help="2·AUC − 1 usando la tasa de default del tramo como score. Criterio de ML.")
+    m1.metric("IV (OptBinning)", f"{r['iv']:.3f}", help="Information Value con los tramos de OptBinning en train: el criterio de selección.")
+    m2.metric("Gini (OptBinning)", f"{r['gini']:.3f}", help="2·AUC − 1 usando la tasa de default del tramo como score. Informativo.")
     m3.metric("IV qcut 5", f"{r['iv_q5']:.3f}", help="IV con el trameado básico de la guía (no supervisado).")
     m4.metric("Gini en test", f"{r['gini_test']:.3f}", f"{r['gini_test'] - r['gini']:+.3f}", delta_color="off")
-    m5.markdown(f"**Logística**  \n{':green-badge[Pasa]' if r['pasa_logistica'] else ':gray-badge[No pasa]'}  \n{r['rango_iv']}")
-    m6.markdown(f"**ML**  \n{':green-badge[Pasa]' if r['pasa_ml'] else ':gray-badge[No pasa]'}  \n{r['rango_gini']}")
+    m5.markdown(f"**Decisión (IV ≥ 0.05)**  \n{':green-badge[Pasa]' if r['pasa'] else ':gray-badge[No pasa]'}  \n{r['rango_iv']}")
+    m6.markdown(f"**Gini (informativo)**  \n{r['rango_gini']}")
 
     if tram == "OptBinning":
         d = bo.query("variable == @var and n > 0").copy()
@@ -182,8 +180,8 @@ with tab_var:
                        "default 5.4 %): por eso la curva baja al final. Es el efecto que se discutió en el univariado.",
                        icon=":material/warning:")
         if var == "CODE_GENDER":
-            st.warning("Pasa el filtro de Gini, pero usar el género en una decisión de crédito es discutible regulatoriamente. "
-                       "Se deja en el dataset de ML para que el equipo lo decida.", icon=":material/gavel:")
+            st.warning(f"Con IV {r['iv']:.3f} no llega a 0.05 y queda fuera del dataset. Igual conviene recordar que usar el género en "
+                       "una decisión de crédito es discutible regulatoriamente.", icon=":material/gavel:")
 
     tabla = d[["tramo", "n", "pct", "k", "rd", "woe", "iv", "n_test", "rd_test"]].copy()
     if tram == "OptBinning" and "miembros" in d and d["miembros"].notna().any():
@@ -220,34 +218,32 @@ with tab_var:
 # 2. RANKING
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_rank:
-    st.markdown("**¿Cómo se lee cada métrica?** Dos escalas, una por dataset, alineadas entre sí.")
+    st.markdown("**¿Cómo se lee cada métrica?** El IV decide; el Gini acompaña, en una escala alineada con la del IV.")
     e1, e2 = st.columns(2, gap="large")
     with e1, st.container(border=True):
-        st.markdown("**Information Value (IV)** · criterio del dataset **logístico**")
+        st.markdown("**Information Value (IV)** · criterio **único** de selección")
         tabla_texto(pd.DataFrame({"Rango": ["< 0.02", "0.02 – 0.1", "0.1 – 0.3", "0.3 – 0.5", "≥ 0.5"],
                                   "Interpretación": ["Not good", "Weak", "Medium", "Strong", "Might be over fitting, recheck"],
-                                  "Decisión": ["Fuera", "Fuera", "Pasa", "Pasa", "Pasa e informa"]}))
-        st.caption("Rangos de Siddiqi (*Credit Risk Scorecards*). Se conservan los tres últimos: IV ≥ 0.1.")
+                                  "Decisión": ["Fuera", "Pasa desde 0.05", "Pasa", "Pasa", "Pasa e informa"]}))
+        st.caption("Rangos de Siddiqi (*Credit Risk Scorecards*). Corte en **0.05**, la referencia de la guía: deja fuera lo «Not "
+                   "good» y la mitad baja de «Weak».")
     with e2, st.container(border=True):
-        st.markdown("**Gini univariado** · criterio del dataset de **machine learning**")
+        st.markdown("**Gini univariado** · informativo")
         tabla_texto(pd.DataFrame({"Rango": ["< 0.08", "0.08 – 0.18", "0.18 – 0.30", "0.30 – 0.38", "≥ 0.38"],
                                   "Interpretación": ["Sin poder", "Débil", "Medio", "Fuerte", "Revisar sobreajuste"],
-                                  "IV equivalente": ["< 0.02", "0.02 – 0.1", "0.1 – 0.3", "0.3 – 0.5", "≥ 0.5"],
-                                  "Decisión": ["Fuera", "Pasa", "Pasa", "Pasa", "Pasa e informa"]}))
-        st.caption("Cortes traducidos desde la escala de IV (ver la justificación abajo). Se conserva desde «Débil»: Gini ≥ 0.08.")
+                                  "IV equivalente": ["< 0.02", "0.02 – 0.1", "0.1 – 0.3", "0.3 – 0.5", "≥ 0.5"]}))
+        st.caption("Cortes traducidos desde la escala de IV: si el score se distribuye normal en buenos y malos con separación *d*, "
+                   "IV ≈ *d*² y Gini = 2·Φ(*d*/√2) − 1. IV = 0.05 equivale a Gini ≈ 0.13.")
 
-    with st.expander("¿Por qué Gini ≥ 0.08 para ML y no el mismo umbral que la logística?", icon=":material/help:", expanded=True):
+    with st.expander("¿Por qué un único criterio (IV ≥ 0.05) para todos los modelos?", icon=":material/help:", expanded=True):
         st.markdown(
-            "1. **Las dos métricas miden lo mismo con otra escala.** Si el score de una variable se distribuye normal en buenos y "
-            "malos con una separación *d*, entonces IV ≈ *d*² y Gini = 2·Φ(*d*/√2) − 1. Con esa relación, los cortes de IV "
-            "0.02 / 0.1 / 0.3 / 0.5 equivalen a Gini **0.08 / 0.18 / 0.30 / 0.38**. El gráfico de abajo confirma que en estos datos "
-            "la relación se cumple casi exactamente.\n"
-            "2. **Un árbol aprovecha señales débiles.** La logística suma efectos individuales: una variable débil le aporta poco y le "
-            "quita estabilidad. Un árbol, un Random Forest o XGBoost combinan variables (interacciones) y no linealidades, así que una "
-            "variable débil por sí sola puede ser útil en conjunto. Por eso el umbral de ML es el inicio de la escala «débil» "
-            "(equivalente a IV = 0.02) y el de la logística, el inicio de «media» (IV = 0.1).\n"
-            "3. **Consecuencia que conviene tener presente:** como IV y Gini se calculan sobre los mismos tramos, ordenan las variables "
-            "casi igual. Lo que realmente diferencia los dos datasets es **el umbral**, no la métrica."
+            "1. **Indicación de la profesora:** el entrenamiento parte de **un solo dataset**, el que sale del multivariado. La única "
+            "razón para tener dos versiones es el desbalance del `TARGET` (original y rebalanceada con SMOTE), no las variables.\n"
+            "2. **IV y Gini dicen casi lo mismo.** Se calculan sobre los mismos tramos y ordenan las variables casi igual (gráfico de "
+            "abajo). Usar uno u otro cambia poco; lo que cambiaba la selección era tener **dos umbrales**.\n"
+            "3. **¿Y los árboles?** Antes se defendía un umbral más bajo para ML porque un árbol puede aprovechar señales débiles en "
+            "combinación. Con un dataset único esa ventaja se renuncia a propósito: se gana un proceso más simple y comparable entre "
+            "modelos. Si XGBoost rinde muy por debajo de lo esperado, este es el primer supuesto a revisar."
         )
 
     rk = bi.copy()
@@ -278,28 +274,28 @@ with tab_rank:
     curva = pd.DataFrame({"iv": np.linspace(0.0005, 0.7, 200)})
     from scipy.stats import norm
     curva["gini"] = 2 * norm.cdf(np.sqrt(curva["iv"]) / np.sqrt(2)) - 1
-    rk["dataset"] = np.where(rk["pasa_logistica"], "Logística y ML", np.where(rk["pasa_ml"], "Solo ML", "Ninguno"))
+    rk["decision"] = np.where(rk["pasa"], "Pasa (IV ≥ 0.05)", "No pasa")
     puntos = alt.Chart(rk).mark_circle(size=60, opacity=0.8, stroke="white", strokeWidth=0.6).encode(
         x=alt.X("iv:Q", title="IV", scale=alt.Scale(type="sqrt")), y=alt.Y("gini:Q", title="Gini", scale=alt.Scale(type="sqrt")),
-        color=alt.Color("dataset:N", scale=alt.Scale(domain=["Logística y ML", "Solo ML", "Ninguno"], range=[AZUL, VERDE, BARRA]),
+        color=alt.Color("decision:N", scale=alt.Scale(domain=["Pasa (IV ≥ 0.05)", "No pasa"], range=[AZUL, BARRA]),
                         legend=alt.Legend(orient="top", title=None)),
         tooltip=[alt.Tooltip("variable:N"), alt.Tooltip("iv:Q", format=".4f"), alt.Tooltip("gini:Q", format=".4f")])
     s1.altair_chart((alt.Chart(curva).mark_line(color=NARANJA, strokeDash=[6, 4], strokeWidth=2).encode(x="iv:Q", y="gini:Q")
-                     + puntos + alt.Chart(pd.DataFrame({"x": [IV_MIN]})).mark_rule(color=AZUL, strokeDash=[3, 3]).encode(x="x:Q")
-                     + alt.Chart(pd.DataFrame({"y": [GINI_MIN]})).mark_rule(color=VERDE, strokeDash=[3, 3]).encode(y="y:Q"))
+                     + puntos + alt.Chart(pd.DataFrame({"x": [IV_MIN]})).mark_rule(color=AZUL, strokeDash=[3, 3]).encode(x="x:Q"))
                     .properties(title={"text": "IV vs. Gini: casi la misma información",
-                                       "subtitle": "Línea naranja: relación teórica Gini = 2Φ(√IV/√2) − 1 · punteadas: umbrales IV 0.1 y Gini 0.08"}),
+                                       "subtitle": "Línea naranja: relación teórica Gini = 2Φ(√IV/√2) − 1 · punteada azul: umbral IV 0.05"}),
                     width="stretch", height=360)
     with s2:
         st.markdown("**¿Cuántas variables pasarían con otro umbral de IV?**")
-        umbral = st.select_slider("Umbral de IV", [0.02, 0.03, 0.05, 0.08, 0.10, 0.15, 0.20, 0.30], value=0.10, key="iv_whatif")
+        umbral = st.select_slider("Umbral de IV", [0.02, 0.03, 0.05, 0.08, 0.10, 0.15, 0.20, 0.30], value=0.05, key="iv_whatif")
         n_pasa = int((bi["iv"] >= umbral).sum())
-        st.metric("Variables con IV ≥ umbral", n_pasa, f"{n_pasa - int(bi['pasa_logistica'].sum()):+d} vs. el criterio elegido", delta_color="off")
+        st.metric("Variables con IV ≥ umbral", n_pasa, f"{n_pasa - int(bi['pasa'].sum()):+d} vs. el criterio elegido", delta_color="off")
         st.caption(", ".join(bi.loc[bi["iv"] >= umbral].sort_values("iv", ascending=False)["variable"].head(18)) +
                    (" …" if n_pasa > 18 else ""))
-        nota(f"Con **IV ≥ 0.1** solo pasan **{int(bi['pasa_logistica'].sum())} variables**: los tres scores externos y la antigüedad "
-             f"laboral. La guía usa 0.05 como referencia (pasarían {int((bi['iv'] >= 0.05).sum())}). Es una decisión del equipo con un "
-             "costo claro: una logística muy parsimoniosa, que depende casi por completo de los scores externos.", ":material/balance:")
+        nota(f"Con **IV ≥ 0.05** pasan **{int(bi['pasa'].sum())} variables**. Con el umbral anterior de 0.1 eran solo "
+             f"{int((bi['iv'] >= 0.1).sum())} (los tres scores externos y la antigüedad laboral). Bajar el corte suma variables de "
+             "solicitud, ocupación e historial: el modelo depende menos de los scores externos, a cambio de señales individuales más "
+             "débiles (todas en el rango «Weak»).", ":material/balance:")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. PATRONES
@@ -312,7 +308,7 @@ with tab_pat:
          pat["patron"].eq("Sin patrón claro"), pat["patron"].eq("Dos niveles"), pat["tipo"].eq("categórica")],
         ["Sin patrón claro", "Tendencia monótona", "No lineal (cóncava / convexa)", "Sin patrón claro", "Dos niveles (binaria)",
          "Categórica: diferencias por grupo"], "Sin patrón claro")
-    pat.loc[(pat["iv"] >= IV_MIN), "separacion"] = "Separación clara (IV ≥ 0.1)"
+    pat.loc[(pat["iv"] >= 0.1), "separacion"] = "Separación clara (IV ≥ 0.1)"
     orden_gg = ["Tendencia monótona", "No lineal (cóncava / convexa)", "Dos niveles (binaria)", "Categórica: diferencias por grupo", "Sin patrón claro"]
     cnt = pat.groupby("grupo_guia").size().reindex(orden_gg).fillna(0).reset_index(name="n")
     p1, p2 = st.columns([2, 3], gap="large")
@@ -346,46 +342,48 @@ with tab_pat:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_sel:
     st.markdown(
-        "Primer filtro formal de la guía (Paso 6.4), con un criterio por tipo de modelo, más dos controles que el bivariado "
-        "permite hacer:\n\n"
-        "- **Estabilidad train → test.** Con los tramos aprendidos en train, el orden de la tasa de default en test debe parecerse "
-        "(ρ de Spearman ≥ 0.5) y el Gini de test no puede caer a menos de la mitad. Si no, el patrón es ruido y la variable sale.\n"
-        "- **Señal sospechosa.** IV ≥ 0.5 (o Gini ≥ 0.38) se informa, porque puede indicar fuga de información.")
-    s1, s2 = st.columns(2, gap="large")
-    for col, ds, campo, metrica, umbral, nombre in [(s1, "logística", "pasa_logistica", "iv", IV_MIN, "IV"),
-                                                    (s2, "ML", "pasa_ml", "gini", GINI_MIN, "Gini")]:
-        with col, st.container(border=True):
-            sel = bi[bi[campo]].sort_values(metrica, ascending=False)
-            st.markdown(f"**Dataset {ds}** · {nombre} ≥ {umbral} → **{len(sel)} variables** pasan al multivariado")
-            st.dataframe(sel[["variable", metrica, f"{metrica}_test", "patron"]],
-                         hide_index=True, width="stretch", height=min(38 + 35 * len(sel), 420),
-                         column_config={"variable": st.column_config.TextColumn("Variable", width=200),
-                                        metrica: st.column_config.NumberColumn(nombre, format="%.3f", width=55),
-                                        f"{metrica}_test": st.column_config.NumberColumn(f"{nombre} test", format="%.3f", width=65),
-                                        "patron": st.column_config.TextColumn("Patrón (qcut 5)", width=150)})
-    st.markdown("**Estabilidad: Gini en train vs. test**")
-    est = bi.copy()
-    est["estado"] = np.where(~est["estable"], "Inestable (sale)", np.where(est["pasa_ml"], "Pasa ML", "No pasa"))
-    diag = pd.DataFrame({"x": [0, 0.32], "y": [0, 0.32]})
-    st.altair_chart((alt.Chart(diag).mark_line(color=GRIS, strokeDash=[4, 4]).encode(x="x:Q", y="y:Q")
-                     + alt.Chart(est).mark_circle(size=60, opacity=0.85, stroke="white").encode(
-                         x=alt.X("gini:Q", title="Gini en train"), y=alt.Y("gini_test:Q", title="Gini en test"),
-                         color=alt.Color("estado:N", scale=alt.Scale(domain=["Pasa ML", "No pasa", "Inestable (sale)"], range=[AZUL, BARRA, NARANJA]),
-                                         legend=alt.Legend(orient="top", title=None)),
-                         tooltip=[alt.Tooltip("variable:N"), alt.Tooltip("gini:Q", format=".3f"), alt.Tooltip("gini_test:Q", format=".3f"),
-                                  alt.Tooltip("rho_tramos_train_test:Q", format=".2f", title="ρ tramos train/test")]))
-                    .properties(height=320), width="stretch")
-    st.caption("Sobre la diagonal, la variable discrimina igual en test que en train. Las dos inestables (`NAME_TYPE_SUITE`, "
-               "`WEEKDAY_APPR_PROCESS_START`) tienen Gini ~0.01: su «señal» en train era ruido.")
+        "Primer filtro formal de la guía (Paso 6.4), con **un criterio único: IV ≥ 0.05**. Dos controles adicionales se reportan "
+        "como información, sin cambiar la decisión:\n\n"
+        "- **Estabilidad train → test.** Con los tramos aprendidos en train, el orden de la tasa de default en test debería parecerse "
+        "(ρ de Spearman ≥ 0.5) y el Gini de test no debería caer a menos de la mitad.\n"
+        "- **Señal sospechosa.** IV ≥ 0.5 se informa, porque puede indicar sobreajuste o fuga de información.")
+    s1, s2 = st.columns([3, 2], gap="large")
+    with s1, st.container(border=True):
+        sel = bi[bi["pasa"]].sort_values("iv", ascending=False)
+        st.markdown(f"**IV ≥ {IV_MIN} → {len(sel)} variables** pasan al multivariado")
+        st.dataframe(sel[["variable", "iv", "iv_test", "gini", "patron"]],
+                     hide_index=True, width="stretch", height=min(38 + 35 * len(sel), 600),
+                     column_config={"variable": st.column_config.TextColumn("Variable", width=230),
+                                    "iv": st.column_config.NumberColumn("IV", format="%.3f", width=60),
+                                    "iv_test": st.column_config.NumberColumn("IV test", format="%.3f", width=65),
+                                    "gini": st.column_config.NumberColumn("Gini", format="%.3f", width=60),
+                                    "patron": st.column_config.TextColumn("Patrón (qcut 5)", width=170)})
+    with s2:
+        est = bi.copy()
+        est["estado"] = np.where(~est["estable"], "Inestable", np.where(est["pasa"], "Pasa (IV ≥ 0.05)", "No pasa"))
+        diag = pd.DataFrame({"x": [0, 0.32], "y": [0, 0.32]})
+        st.altair_chart((alt.Chart(diag).mark_line(color=GRIS, strokeDash=[4, 4]).encode(x="x:Q", y="y:Q")
+                         + alt.Chart(est).mark_circle(size=60, opacity=0.85, stroke="white").encode(
+                             x=alt.X("gini:Q", title="Gini en train"), y=alt.Y("gini_test:Q", title="Gini en test"),
+                             color=alt.Color("estado:N", scale=alt.Scale(domain=["Pasa (IV ≥ 0.05)", "No pasa", "Inestable"], range=[AZUL, BARRA, NARANJA]),
+                                             legend=alt.Legend(orient="top", title=None)),
+                             tooltip=[alt.Tooltip("variable:N"), alt.Tooltip("iv:Q", format=".3f"), alt.Tooltip("gini:Q", format=".3f"),
+                                      alt.Tooltip("gini_test:Q", format=".3f"),
+                                      alt.Tooltip("rho_tramos_train_test:Q", format=".2f", title="ρ tramos train/test")]))
+                        .properties(title="Estabilidad: Gini en train vs. test", height=340), width="stretch")
+        inest = bi[~bi["estable"]].sort_values("iv", ascending=False)
+        st.caption("Sobre la diagonal, la variable discrimina igual en test que en train. Las inestables (" +
+                   ", ".join(f"`{v}`" for v in inest["variable"]) + ") tienen IV < 0.01: ninguna llegaba al corte, así que el control "
+                   "no cambia la selección.")
     st.markdown("**Decisión por variable**")
-    tabla = bi[["variable", "tipo", "familia", "iv", "rango_iv", "gini", "rango_gini", "estable", "pasa_logistica", "pasa_ml"]].copy()
+    tabla = bi[["variable", "tipo", "familia", "iv", "rango_iv", "gini", "rango_gini", "estable", "pasa"]].copy()
     tabla["familia"] = tabla["familia"].map(fam_corta)
     st.dataframe(tabla.sort_values("iv", ascending=False), hide_index=True, width="stretch", height=420,
                  column_config={"variable": st.column_config.TextColumn("Variable", pinned=True, width=220),
                                 "iv": st.column_config.NumberColumn("IV", format="%.4f"), "gini": st.column_config.NumberColumn("Gini", format="%.4f"),
                                 "rango_iv": st.column_config.TextColumn("Rango IV", width=170), "rango_gini": st.column_config.TextColumn("Rango Gini", width=170),
                                 "estable": st.column_config.CheckboxColumn("Estable"),
-                                "pasa_logistica": st.column_config.CheckboxColumn("Logística"), "pasa_ml": st.column_config.CheckboxColumn("ML")})
+                                "pasa": st.column_config.CheckboxColumn("Pasa (IV ≥ 0.05)")})
 
 st.divider()
 st.caption("Fuente: `scripts/pipeline_modelado.py` (etapas `binning` y `seleccion`): qcut y OptBinning (max_n_prebins=20, "

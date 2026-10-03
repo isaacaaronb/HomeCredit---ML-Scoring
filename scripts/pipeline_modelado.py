@@ -1,15 +1,15 @@
-"""Pipeline de modelado: partición, outliers, filtros univariado / bivariado / multivariado y datasets finales.
+"""Pipeline de modelado: partición, outliers, filtros univariado / bivariado / multivariado y dataset final.
 
 Etapas (se pueden correr por separado; cada una lee lo que dejó la anterior):
 
-  python scripts/pipeline_modelado.py outliers    # partición train/test + reasignación de outliers por tasa de default
+  python scripts/pipeline_modelado.py outliers    # partición 80/20 + valores imposibles, eliminación y capeo p0.1–p99.9
   python scripts/pipeline_modelado.py binning     # trameado qcut (5 y 10) y OptBinning sobre train, para todas las variables
-  python scripts/pipeline_modelado.py seleccion   # filtro univariado, bivariado (IV / Gini) y multivariado (Spearman)
-  python scripts/pipeline_modelado.py datasets    # dataset logístico (WoE) y dataset ML (SMOTE solo en train)
+  python scripts/pipeline_modelado.py seleccion   # filtro univariado, bivariado (IV ≥ 0.05) y multivariado (Spearman, menor IV sale)
+  python scripts/pipeline_modelado.py datasets    # dataset de entrenamiento único: versión original y versión SMOTE
   python scripts/pipeline_modelado.py todo        # las cuatro, en orden
 
-Principio de la guía («Errores frecuentes»): todo lo que usa el TARGET —reasignación de outliers, bines, WoE, IV, Gini,
-selección y SMOTE— se aprende SOLO con train y se aplica después a test.
+Principio de la guía («Errores frecuentes»): todo lo que se aprende de los datos —percentiles de capeo, bines, WoE, IV,
+selección y SMOTE— se calcula SOLO con train y se aplica después a test.
 
 Entradas:  artifacts/tablon_imputado.parquet (notebook, Paso 3: faltantes y centinelas)
 Salidas:   artifacts/tablon_tratado.parquet, artifacts/parametros_outliers.json, artifacts/modelado/*
@@ -31,30 +31,23 @@ OUT = ART / "modelado"
 DATASETS = OUT / "datasets"
 ID, TARGET = "SK_ID_CURR", "TARGET"
 SEMILLA = 42
-TEST_SIZE = 0.30
+TEST_SIZE = 0.20                # partición 80/20 estratificada (indicación de la profesora)
 
-# ── Outliers ────────────────────────────────────────────────────────────────────────────────────────
-# Umbral de detección: el mismo percentil decidido en la etapa anterior (evidencia en «Calidad»), recalculado en train.
-# OWN_CAR_AGE: el umbral es de negocio (64–65 años es un bloque de codificación y 91 es imposible; ≤ 63 es plausible).
-UMBRAL_OUTLIER = {"AMT_INCOME_TOTAL": ("percentil", 99.9), "CNT_CHILDREN": ("percentil", 99.9),
-                  "CNT_FAM_MEMBERS": ("percentil", 99.9), "OBS_30_CNT_SOCIAL_CIRCLE": ("percentil", 99.9),
-                  "OBS_60_CNT_SOCIAL_CIRCLE": ("percentil", 99.9), "AMT_REQ_CREDIT_BUREAU_QRT": ("percentil", 99.9),
-                  "OWN_CAR_AGE": ("valor", 63)}
-TOPES_ANTERIORES = {"AMT_INCOME_TOTAL": 900000.0, "CNT_CHILDREN": 4.0, "CNT_FAM_MEMBERS": 6.0, "OBS_30_CNT_SOCIAL_CIRCLE": 17.0,
-                    "OBS_60_CNT_SOCIAL_CIRCLE": 16.0, "AMT_REQ_CREDIT_BUREAU_QRT": 4.0, "OWN_CAR_AGE": 30.0}
-MAX_VALORES_DISCRETOS = 70     # hasta aquí cada valor es un tramo candidato; si no, qcut en 20 tramos
-N_TRAMOS_CONTINUA = 20
-TOLERANCIA_RD = 0.005          # el tramo destino no puede mover su tasa de default más de 0.5 p.p. al recibir a los atípicos
+# ── Outliers (indicación de la profesora: simple; eliminar lo imposible y escaso, capear el resto) ──────────────
+CAR_RELLENO = (64, 65)          # OWN_CAR_AGE: bloque de 64–65 años = código de relleno → nulo («antigüedad desconocida»)
+FACTOR_EXTREMO = 3.0            # «super extremo»: más de 3 veces el percentil 99.9 (o 3 veces el 0.1 si es negativo)
+MAX_FILAS_ELIMINAR = 20         # …y tan escaso (≤ 20 créditos en toda la base) que se elimina la fila; si son más, se capea
+PCT_CAPEO = (0.1, 99.9)         # capeo de las dos colas en los percentiles 0.1 y 99.9 de train (comparado con 1–99)
 
 # ── Filtros ─────────────────────────────────────────────────────────────────────────────────────────
 DOMINANTE_MAX = 0.99            # univariado: un valor concentra ≥ 99 % de los datos no nulos → varianza casi nula
 NULOS_MAX = 0.50                # univariado: más de 50 % de nulos…
+GINI_NULOS = 0.08               # …y Gini < 0.08: el poder discriminante no compensa los nulos
 CARDINALIDAD_ALTA = 15          # univariado: más de 15 categorías → agrupar por tasa de default
-IV_MIN = 0.10                   # bivariado logística: rangos «Medium», «Strong» y «≥ 0.5»
-IV_SOSPECHOSO = 0.50
-GINI_MIN = 0.08                 # bivariado ML (ver justificación en la app): equivale a IV = 0.02 (inicio de «Weak»)
-GINI_SOSPECHOSO = 0.38          # equivale a IV = 0.50
-RHO_MAX = 0.60                  # multivariado: |ρ de Spearman| > 0.6 → redundantes
+IV_MIN = 0.05                   # bivariado: criterio ÚNICO para todos los modelos (IV del WoE de OptBinning)
+IV_SOSPECHOSO = 0.50            # se informa: posible sobreajuste / fuga
+GINI_SOSPECHOSO = 0.38          # (informativo) equivale a IV = 0.50
+RHO_MAX = 0.60                  # multivariado: |ρ de Spearman| > 0.6 → redundantes; sale la de menor IV
 OPTB = dict(max_n_prebins=20, min_prebin_size=0.05, max_n_bins=5)   # parámetros de la guía (Paso 6.2)
 
 
@@ -67,145 +60,122 @@ def leer(nombre: str) -> pd.DataFrame:
     return pd.read_parquet(OUT / f"{nombre}.parquet")
 
 
-def wilson(k: float, n: int, z: float = 1.96):
-    if n == 0:
-        return np.nan, np.nan
-    p = k / n
-    den = 1 + z ** 2 / n
-    c = (p + z ** 2 / (2 * n)) / den
-    h = z * np.sqrt(p * (1 - p) / n + z ** 2 / (4 * n ** 2)) / den
-    return c - h, c + h
-
-
-def tope(s: pd.Series, p: float) -> float:
-    s = s.dropna()
-    entera = bool((s % 1 == 0).all())
-    return float(s.quantile(p / 100, interpolation="higher" if entera else "linear"))
-
-
-def cargar_base():
-    imp = pd.read_parquet(ART / "tablon_imputado.parquet")
-    part = leer("particion").set_index(ID)["muestra"]
-    return imp, imp[ID].map(part)
-
-
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # 1. PARTICIÓN Y OUTLIERS
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-def tramos_candidatos(s: pd.Series):
-    """Etiqueta de tramo para los valores NO atípicos: cada valor (discretas) o 20 cuantiles (continuas)."""
+def limite(s: pd.Series, p: float) -> float:
+    """Percentil p (0–100) de una serie; en variables enteras se toma un valor observado hacia afuera de la cola."""
+    s = s.dropna()
+    if s.empty:
+        return np.nan
     entera = bool((s % 1 == 0).all())
-    if entera and s.nunique() <= MAX_VALORES_DISCRETOS:
-        return s.astype(float), True
-    return pd.qcut(s, N_TRAMOS_CONTINUA, duplicates="drop"), False
+    modo = "linear" if not entera else ("higher" if p >= 50 else "lower")
+    return float(s.quantile(p / 100, interpolation=modo))
+
+
+def n_tukey(x: pd.Series) -> int:
+    x = x.dropna()
+    q1, q3 = x.quantile([0.25, 0.75])
+    i = q3 - q1
+    return int(((x < q1 - 1.5 * i) | (x > q3 + 1.5 * i)).sum())
+
+
+def iv_optb(x: pd.Series, y: pd.Series) -> float:
+    from optbinning import OptimalBinning
+    ob = OptimalBinning(name="x", dtype="numerical", **OPTB)
+    ob.fit(x.to_numpy(dtype=float), y.to_numpy())
+    return float(ob.binning_table.build().loc["Totals", "IV"])
 
 
 def etapa_outliers() -> None:
+    """Tres pasos, en este orden:
+    A. Valores sin sentido de negocio → nulo (bloque 64–65 de OWN_CAR_AGE).
+    B. Valores «super extremos» (> 3 × p99.9 de train) y escasos (≤ 20 créditos): se elimina la fila (train y test).
+    C. Capeo de las dos colas de cada numérica en los percentiles 0.1 y 99.9 de train (se aplica igual a test).
+    """
     from sklearn.model_selection import train_test_split
 
     imp = pd.read_parquet(ART / "tablon_imputado.parquet")
+    nums = tipos_variables().query("tipo == 'numérica'")["variable"].tolist()
     tr_ids, _ = train_test_split(imp[ID], test_size=TEST_SIZE, stratify=imp[TARGET], random_state=SEMILLA)
-    muestra = np.where(imp[ID].isin(set(tr_ids)), "train", "test")
-    guardar("particion", pd.DataFrame({ID: imp[ID], "muestra": muestra}))
-    es_tr = pd.Series(muestra == "train", index=imp.index)
-    tr = imp[es_tr]
-
+    es_tr = imp[ID].isin(set(tr_ids))
     trat = imp.copy()
-    resumen, tramos_out, params = [], [], {}
-    for v, (regla, par) in UMBRAL_OUTLIER.items():
-        s = tr[v].dropna()
-        y = tr.loc[s.index, TARGET]
-        umbral = tope(s, par) if regla == "percentil" else float(par)
-        es_out = s > umbral
-        n_out, k_out = int(es_out.sum()), int(y[es_out].sum())
-        rd_out = k_out / n_out
-        lo, hi = wilson(k_out, n_out)
 
-        sv, yv = s[~es_out], y[~es_out]
-        etq, discreta = tramos_candidatos(sv)
-        g = pd.DataFrame({"x": sv, "y": yv, "t": etq}).groupby("t", observed=True).agg(
-            n=("y", "size"), k=("y", "sum"), mediana=("x", "median"), desde=("x", "min"), hasta=("x", "max"))
-        g["rd"] = g["k"] / g["n"]
-        g["orden"] = np.arange(len(g))
-        # RD del tramo si recibiera a los atípicos: mide cuánto se «distorsiona» un rango sano (la crítica al tope)
-        g["rd_si_recibe"] = (g["k"] + k_out) / (g["n"] + n_out)
-        g["desplazamiento"] = (g["rd_si_recibe"] - g["rd"]).abs()
-        g["compatible"] = (g["rd"] >= lo) & (g["rd"] <= hi) & (g["n"] >= n_out)
-        ok = g["compatible"] & (g["desplazamiento"] <= TOLERANCIA_RD)
-        if ok.any():
-            dest = g[ok].iloc[-1]                              # el más cercano al umbral: preserva el orden de la variable
-            criterio = "RD dentro del IC 95 % de los atípicos y desplazamiento ≤ 0.5 p.p.; el tramo más cercano al umbral"
-        elif g["compatible"].any():
-            dest = g[g["compatible"]].sort_values("desplazamiento").iloc[0]
-            criterio = "RD dentro del IC 95 %; el tramo que menos se desplaza"
-        else:
-            dest = g.sort_values("desplazamiento").iloc[0]
-            criterio = "Ningún tramo dentro del IC 95 %: el que menos se desplaza"
-        valor = float(dest.name) if discreta else float(dest["mediana"])
-        if bool((s % 1 == 0).all()):
-            valor = float(round(valor))
+    # ── A. Código de relleno → nulo ──
+    relleno = trat["OWN_CAR_AGE"].isin(CAR_RELLENO)
+    resumen_a = {"variable": "OWN_CAR_AGE", "regla": f"Valores {CAR_RELLENO[0]}–{CAR_RELLENO[1]} años → nulo",
+                 "n_total": int(relleno.sum()), "n_train": int((relleno & es_tr).sum()),
+                 "rd_train": float(trat.loc[relleno & es_tr, TARGET].mean()),
+                 "rd_resto_con_auto": float(trat.loc[~relleno & es_tr & trat["OWN_CAR_AGE"].notna(), TARGET].mean())}
+    trat.loc[relleno, "OWN_CAR_AGE"] = np.nan
 
-        # Comparación con el tope anterior (todo lo que superaba el tope se llevaba al tope)
-        cap = TOPES_ANTERIORES[v]
-        s_cap = s.clip(upper=cap)
-        s_new = s.where(~es_out, valor)
+    # ── B. Super extremos y escasos → eliminar la fila ──
+    tr0 = trat[es_tr]
+    elim, borrar = [], pd.Series(False, index=trat.index)
+    for v in nums:
+        s = tr0[v]
+        p_hi, p_lo = limite(s, 99.9), limite(s, 0.1)
+        m_hi = trat[v] > FACTOR_EXTREMO * p_hi if p_hi > 0 else pd.Series(False, index=trat.index)
+        m_lo = trat[v] < FACTOR_EXTREMO * p_lo if p_lo < 0 else pd.Series(False, index=trat.index)
+        for lado, m, p_ref in [("superior", m_hi, p_hi), ("inferior", m_lo, p_lo)]:
+            n = int(m.sum())
+            if n == 0:
+                continue
+            decision = "Elimina la fila" if n <= MAX_FILAS_ELIMINAR else "Se capea (demasiados casos para eliminar)"
+            vals = trat.loc[m, v].sort_values(ascending=(lado == "inferior"))
+            elim.append({"variable": v, "lado": lado, "p999": p_ref, "umbral": FACTOR_EXTREMO * p_ref, "n": n,
+                         "n_train": int((m & es_tr).sum()), "valores": ", ".join(fmt(x) for x in vals.head(6)) + (" …" if n > 6 else ""),
+                         "rd": float(trat.loc[m, TARGET].mean()), "decision": decision})
+            if n <= MAX_FILAS_ELIMINAR:
+                borrar |= m
+    elim = pd.DataFrame(elim)
+    filas_borradas = trat.loc[borrar, [ID, TARGET]].assign(muestra=np.where(es_tr[borrar], "train", "test"))
+    guardar("particion", pd.DataFrame({ID: imp[ID], "muestra": np.where(es_tr, "train", "test"), "eliminada": borrar.to_numpy()}))
+    trat, es_tr = trat[~borrar].copy(), es_tr[~borrar]
 
-        def tramo_de(x):
-            """Posición (0..k-1) del tramo candidato al que cae cada valor."""
-            if discreta:
-                pos = {val: i for i, val in enumerate(g.index)}
-                return x.astype(float).map(pos)
-            bordes = [iv.right for iv in g.index[:-1]]
-            return pd.Series(np.searchsorted(bordes, x.to_numpy(), side="left"), index=x.index)
-
-        t_cap, t_new = tramo_de(s_cap), tramo_de(s_new)
-        pos_dest = int(dest["orden"])
-        pos_cap = int(t_cap[s > cap].iloc[0]) if (s > cap).any() else None
-        for t_, r in g.iterrows():
-            i = int(r["orden"])
-            m_cap, m_new = t_cap == i, t_new == i
-            tramos_out.append({
-                "variable": v, "orden": i,
-                "tramo": fmt(t_) if discreta else f"{fmt(r['desde'])}–{fmt(r['hasta'])}",
-                "n": int(r["n"]), "rd": r["rd"], "compatible": bool(r["compatible"]),
-                "n_reasignacion": int(m_new.sum()), "rd_reasignacion": float(y[m_new].mean()),
-                "n_tope": int(m_cap.sum()), "rd_tope": float(y[m_cap].mean()) if m_cap.any() else np.nan,
-                "es_destino": i == pos_dest, "es_destino_tope": i == pos_cap})
-        tramo_cap = pos_cap
-        d_cap = next(x for x in tramos_out[::-1] if x["variable"] == v and x["es_destino_tope"]) if tramo_cap is not None else None
-        d_new = next(x for x in tramos_out[::-1] if x["variable"] == v and x["es_destino"])
-        # test: cuántos atípicos y su RD (la regla se aplica con lo aprendido en train)
-        te = imp[~es_tr]
-        te_out = te[v] > umbral
-        pv = stats.chi2_contingency([[k_out, n_out - k_out], [int(dest["k"]), int(dest["n"] - dest["k"])]])[1]
-        resumen.append({
-            "variable": v, "regla": "Percentil 99.9 (train)" if regla == "percentil" else "Negocio: > 63 años",
-            "umbral": umbral, "n_atipicos_train": n_out, "n_atipicos_test": int(te_out.sum()),
-            "rd_atipicos": rd_out, "ic_bajo": lo, "ic_alto": hi,
-            "rd_atipicos_test": float(te.loc[te_out, TARGET].mean()) if te_out.any() else np.nan,
-            "tramo_destino": d_new["tramo"], "n_destino": d_new["n"], "rd_destino_antes": d_new["rd"],
-            "rd_destino_despues": d_new["rd_reasignacion"], "valor_asignado": valor, "p_valor": pv, "criterio": criterio,
-            "tope_anterior": cap, "n_afectados_tope": int((s > cap).sum()),
-            "tramo_tope": d_cap["tramo"] if d_cap else None, "n_tramo_tope": d_cap["n"] if d_cap else np.nan,
-            "rd_tramo_tope_antes": d_cap["rd"] if d_cap else np.nan, "rd_tramo_tope_despues": d_cap["rd_tope"] if d_cap else np.nan,
-        })
-        params[v] = {"umbral": umbral, "valor_asignado": valor, "regla": regla}
-        trat.loc[trat[v] > umbral, v] = valor
+    # ── C. Capeo p0.1–p99.9 (train) + comparación con 1–99 ──
+    tr = trat[es_tr]
+    y_tr = tr[TARGET]
+    cap, params = [], {}
+    for v in nums:
+        s = tr[v]
+        if s.dropna().empty:
+            continue
+        lo, hi = limite(s, PCT_CAPEO[0]), limite(s, PCT_CAPEO[1])
+        lo99, hi99 = limite(s, 1), limite(s, 99)
+        x_all = trat[v]
+        n_lo, n_hi = int((x_all < lo).sum()), int((x_all > hi).sum())
+        sc, s99 = s.clip(lo, hi), s.clip(lo99, hi99)
+        cap.append({"variable": v, "lim_inf": lo, "lim_sup": hi, "n_inf": n_lo, "n_sup": n_hi, "n_modificados": n_lo + n_hi,
+                    "n_mod_train": int(((s < lo) | (s > hi)).sum()), "n_mod_p99_train": int(((s < lo99) | (s > hi99)).sum()),
+                    "min_antes": float(x_all.min()), "max_antes": float(x_all.max()),
+                    "media_antes": float(x_all.mean()), "std_antes": float(x_all.std()), "asim_antes": float(x_all.skew()),
+                    "tukey_antes": n_tukey(s), "tukey_p999": n_tukey(sc), "tukey_p99": n_tukey(s99),
+                    "iv_sin_capeo": iv_optb(s, y_tr), "iv_p999": iv_optb(sc, y_tr), "iv_p99": iv_optb(s99, y_tr)})
+        params[v] = {"inf": lo, "sup": hi}
+        trat[v] = x_all.clip(lo, hi)
+        cap[-1].update({"min_despues": float(trat[v].min()), "max_despues": float(trat[v].max()), "media_despues": float(trat[v].mean()),
+                        "std_despues": float(trat[v].std()), "asim_despues": float(trat[v].skew())})
+    cap = pd.DataFrame(cap)
 
     trat.to_parquet(ART / "tablon_tratado.parquet", index=False, compression="zstd")
-    json.dump({"metodo": "Reasignación por tasa de default: los valores > umbral se llevan al tramo cuya tasa de default "
-                         "es estadísticamente similar (IC 95 % de Wilson) y que, al recibirlos, no mueve su tasa más de 0.5 p.p.; "
-                         "entre los compatibles, el más cercano al umbral. Aprendido solo con train.",
+    json.dump({"metodo": "A) OWN_CAR_AGE 64–65 → nulo (código de relleno). B) Se eliminan las filas con valores > 3 × p99.9 "
+                         "(o < 3 × p0.1 si es negativo) cuando son ≤ 20 créditos en la base. C) Capeo de las dos colas de cada "
+                         "numérica en los percentiles 0.1 y 99.9 de train.",
                "aprendido_en": "train", "semilla_particion": SEMILLA, "test_size": TEST_SIZE,
-               "umbrales": {v: p["umbral"] for v, p in params.items()},
-               "valores_asignados": {v: p["valor_asignado"] for v, p in params.items()},
-               "topes_anteriores": TOPES_ANTERIORES},
+               "car_relleno": list(CAR_RELLENO), "factor_extremo": FACTOR_EXTREMO, "max_filas_eliminar": MAX_FILAS_ELIMINAR,
+               "percentiles_capeo": list(PCT_CAPEO), "filas_eliminadas": filas_borradas[ID].astype(int).tolist(),
+               "limites": params},
               open(ART / "parametros_outliers.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    guardar("outliers_reasignacion", pd.DataFrame(resumen))
-    guardar("outliers_tramos", pd.DataFrame(tramos_out))
-    print(pd.DataFrame(resumen)[["variable", "umbral", "n_atipicos_train", "rd_atipicos", "tramo_destino", "rd_destino_antes",
-                                 "rd_destino_despues", "valor_asignado", "tramo_tope", "rd_tramo_tope_antes",
-                                 "rd_tramo_tope_despues"]].to_string())
+    guardar("outliers_relleno", pd.DataFrame([resumen_a]))
+    guardar("outliers_eliminacion", elim)
+    guardar("outliers_filas_eliminadas", filas_borradas)
+    guardar("outliers_capeo", cap)
+    print(f"A) OWN_CAR_AGE → nulo: {resumen_a['n_total']:,} | B) filas eliminadas: {int(borrar.sum())} "
+          f"(train {int((filas_borradas['muestra'] == 'train').sum())}) | C) valores capeados: {int(cap['n_modificados'].sum()):,}")
+    print(elim.to_string())
+    print("IV: máx |p99.9 − sin| =", float((cap["iv_p999"] - cap["iv_sin_capeo"]).abs().max()),
+          "| máx |p99 − sin| =", float((cap["iv_p99"] - cap["iv_sin_capeo"]).abs().max()))
 
 
 
@@ -428,8 +398,8 @@ def etapa_seleccion() -> None:
         decision, motivo = "Pasa", ""
         if r["pct_dominante"] >= DOMINANTE_MAX:
             decision, motivo = "Elimina", f"Varianza casi nula: «{r['valor_dominante']}» concentra el {r['pct_dominante']:.2%} de los datos"
-        elif r["pct_nulos"] > NULOS_MAX and r["gini"] < GINI_MIN:
-            decision, motivo = "Elimina", f"{r['pct_nulos']:.0%} de nulos y Gini {r['gini']:.3f} < {GINI_MIN}: el poder discriminante no lo compensa"
+        elif r["pct_nulos"] > NULOS_MAX and r["gini"] < GINI_NULOS:
+            decision, motivo = "Elimina", f"{r['pct_nulos']:.0%} de nulos y Gini {r['gini']:.3f} < {GINI_NULOS}: el poder discriminante no lo compensa"
         elif r["tipo"] == "categórica" and r["n_categorias"] > CARDINALIDAD_ALTA:
             ob = bp.get_binned_variable(v)
             bt = ob.binning_table.build()
@@ -450,7 +420,7 @@ def etapa_seleccion() -> None:
             else:
                 decision, motivo = "Elimina", "Alta cardinalidad sin grupos con tasa de default distinta"
         elif r["pct_nulos"] > NULOS_MAX:
-            motivo = f"{r['pct_nulos']:.0%} de nulos, pero Gini {r['gini']:.3f} ≥ {GINI_MIN}: se conserva (el nulo es informativo)"
+            motivo = f"{r['pct_nulos']:.0%} de nulos, pero Gini {r['gini']:.3f} ≥ {GINI_NULOS}: se conserva (el nulo es informativo)"
         fu.append({"variable": v, "tipo": r["tipo"], "familia": r["familia"], "pct_nulos": r["pct_nulos"],
                    "pct_dominante": r["pct_dominante"], "valor_dominante": r["valor_dominante"], "n_categorias": r["n_categorias"],
                    "iv": r["iv"], "gini": r["gini"], "decision": decision, "motivo": motivo})
@@ -459,21 +429,19 @@ def etapa_seleccion() -> None:
     guardar("grupos_cardinalidad", pd.DataFrame(grupos))
     pasan_u = fu.loc[fu["decision"] != "Elimina", "variable"].tolist()
 
-    # ── 3.2 Filtro bivariado (IV para logística, Gini para ML) ──
+    # ── 3.2 Filtro bivariado: criterio ÚNICO para todos los modelos → IV ≥ 0.05 (Gini se reporta, no decide) ──
     bi = met.loc[pasan_u].reset_index()
     bi["rango_iv"] = bi["iv"].map(rango_iv)
     bi["rango_gini"] = bi["gini"].map(rango_gini)
-    bi["pasa_logistica"] = bi["iv"] >= IV_MIN
-    bi["pasa_ml"] = bi["gini"] >= GINI_MIN
-    bi["sospechosa"] = (bi["iv"] >= IV_SOSPECHOSO) | (bi["gini"] >= GINI_SOSPECHOSO)
-    # Estabilidad: con los tramos de OptBinning (los que miden IV y Gini), el orden de la tasa de default en test debe
-    # parecerse al de train (ρ ≥ 0.5) y el Gini de test no puede caer a menos de la mitad.
+    bi["pasa"] = bi["iv"] >= IV_MIN
+    bi["sospechosa"] = bi["iv"] >= IV_SOSPECHOSO
+    # Estabilidad (informativa): con los tramos de OptBinning, el orden de la tasa de default en test debería parecerse
+    # al de train (ρ ≥ 0.5) y el Gini de test no debería caer a menos de la mitad.
     bo = leer("binning_optb")
     bo = bo[(bo["n"] > 0) & (bo["n_test"] > 0)]
     rho_o = bo.groupby("variable").apply(lambda d: stats.spearmanr(d["rd"], d["rd_test"])[0] if len(d) >= 3 else np.nan)
     bi["rho_tramos_train_test"] = bi["variable"].map(rho_o)
     bi["estable"] = ((bi["gini_test"] >= 0.5 * bi["gini"]) & (bi["rho_tramos_train_test"].fillna(1) >= 0.5))
-    bi.loc[~bi["estable"], ["pasa_logistica", "pasa_ml"]] = False
     guardar("bivariado_resumen", bi)
     # Boxplot por clase (guía, Paso 5.2.1): cuantiles de cada numérica según TARGET, en train
     caja = []
@@ -485,7 +453,7 @@ def etapa_seleccion() -> None:
                          "p50": q[0.5], "p75": q[0.75], "p95": q[0.95], "media": x.mean(), "n": len(x)})
     guardar("box_clase", pd.DataFrame(caja))
 
-    # ── 3.3 Multivariado: Spearman entre numéricas (+ dicotómicas 0/1); se conserva la de mayor IV / Gini ──
+    # ── 3.3 Multivariado: Spearman entre numéricas (+ dicotómicas 0/1); de cada par redundante sale la de MENOR IV ──
     def codificar(v):
         s = tr[v]
         if es_texto(s):
@@ -493,64 +461,59 @@ def etapa_seleccion() -> None:
             return (s == clases[-1]).astype(float).where(s.notna())
         return s.astype(float)
 
-    pares_all, sel_all, mats = [], [], []
-    for dataset, col_pasa, metrica in [("logistica", "pasa_logistica", "iv"), ("ml", "pasa_ml", "gini")]:
-        cand = bi[bi[col_pasa]].sort_values(metrica, ascending=False)
-        # Numéricas, dicotómicas (0/1) y categóricas ordinales codificadas como número entran a Spearman (guía, Paso 6.5);
-        # las categóricas nominales no, y entre ellas se usa V de Cramér con el mismo umbral (extensión a la guía).
-        nominal = [v for v in cand["variable"] if cand.set_index("variable").loc[v, "tipo"] == "categórica" and es_texto(tr[v])]
-        num = [v for v in cand["variable"] if v not in nominal]
-        X = pd.DataFrame({v: codificar(v) for v in num})
-        corr = X.corr(method="spearman", min_periods=1000) if len(num) > 1 else pd.DataFrame(1.0, index=num, columns=num)
-        val = cand.set_index("variable")[metrica]
-        elegidas, motivo, medida = [], {}, {}
-        for v in num:
-            choque = [s_ for s_ in elegidas if abs(corr.loc[v, s_]) > RHO_MAX]
-            if choque:
-                motivo[v], medida[v] = choque[0], float(corr.loc[v, choque[0]])
-            else:
-                elegidas.append(v)
-        nom_ok = []
-        for v in nominal:
-            choque = [s_ for s_ in nom_ok if cramer_v(tr[v], tr[s_]) > RHO_MAX]
-            if choque:
-                motivo[v], medida[v] = choque[0], cramer_v(tr[v], tr[choque[0]])
-            else:
-                nom_ok.append(v)
-        finales = set(elegidas) | set(nom_ok)
-        for grupo, medir in [(num, lambda a_, b_: corr.loc[a_, b_]), (nominal, lambda a_, b_: cramer_v(tr[a_], tr[b_]))]:
-            for i, a_ in enumerate(grupo):
-                for b_ in grupo[i + 1:]:
-                    rho = medir(a_, b_)
-                    if pd.notna(rho) and abs(rho) > RHO_MAX:
-                        hi_, lo_ = (a_, b_) if val[a_] >= val[b_] else (b_, a_)
-                        if hi_ in finales and lo_ not in finales:
-                            res = f"Conserva {hi_} · excluye {lo_}"
-                        elif hi_ not in finales and lo_ not in finales:
-                            res = "Ambas excluidas por otra variable más fuerte"
-                        elif hi_ not in finales:
-                            res = f"Conserva {lo_} · {hi_} ya había salido por otra variable"
-                        else:
-                            res = "Ambas se conservan"
-                        pares_all.append({"dataset": dataset, "medida": "Spearman" if grupo is num else "V de Cramér",
-                                          "variable_1": a_, "variable_2": b_, "rho": float(rho),
-                                          "metrica_1": float(val[a_]), "metrica_2": float(val[b_]), "resultado": res})
-        for v in cand["variable"]:
-            sel_all.append({"dataset": dataset, "variable": v, "tipo": cand.set_index("variable").loc[v, "tipo"],
-                            "metrica": float(val[v]), "seleccionada": v in finales,
-                            "redundante_con": motivo.get(v, ""), "medida_redundancia": medida.get(v, np.nan),
-                            "familia": cand.set_index("variable").loc[v, "familia"]})
-        cl = corr.stack().reset_index()
-        cl.columns = ["v1", "v2", "rho"]
-        cl.insert(0, "dataset", dataset)
-        mats.append(cl)
-    guardar("multivariado_pares", pd.DataFrame(pares_all))
-    guardar("multivariado_seleccion", pd.DataFrame(sel_all))
-    guardar("multivariado_corr", pd.concat(mats, ignore_index=True))
-    s_ = pd.DataFrame(sel_all)
-    print(fu["decision"].value_counts().to_dict(), "| logística:", int(bi["pasa_logistica"].sum()), "→",
-          int(s_.query("dataset=='logistica' and seleccionada").shape[0]), "| ML:", int(bi["pasa_ml"].sum()), "→",
-          int(s_.query("dataset=='ml' and seleccionada").shape[0]))
+    cand = bi[bi["pasa"]].sort_values("iv", ascending=False)
+    # Numéricas, dicotómicas (0/1) y categóricas ordinales codificadas como número entran a Spearman (guía, Paso 6.5);
+    # las categóricas nominales no, y entre ellas se usa V de Cramér con el mismo umbral (extensión a la guía).
+    nominal = [v for v in cand["variable"] if cand.set_index("variable").loc[v, "tipo"] == "categórica" and es_texto(tr[v])]
+    num = [v for v in cand["variable"] if v not in nominal]
+    X = pd.DataFrame({v: codificar(v) for v in num})
+    corr = X.corr(method="spearman", min_periods=1000) if len(num) > 1 else pd.DataFrame(1.0, index=num, columns=num)
+    iv_, gini_ = cand.set_index("variable")["iv"], cand.set_index("variable")["gini"]
+    elegidas, motivo, medida = [], {}, {}
+    for v in num:                                   # orden de mayor a menor IV: entra si no es redundante con las que ya entraron
+        choque = [s_ for s_ in elegidas if abs(corr.loc[v, s_]) > RHO_MAX]
+        if choque:
+            motivo[v], medida[v] = choque[0], float(corr.loc[v, choque[0]])
+        else:
+            elegidas.append(v)
+    nom_ok = []
+    for v in nominal:
+        choque = [s_ for s_ in nom_ok if cramer_v(tr[v], tr[s_]) > RHO_MAX]
+        if choque:
+            motivo[v], medida[v] = choque[0], cramer_v(tr[v], tr[choque[0]])
+        else:
+            nom_ok.append(v)
+    finales = set(elegidas) | set(nom_ok)
+    pares = []
+    for grupo, medir in [(num, lambda a_, b_: corr.loc[a_, b_]), (nominal, lambda a_, b_: cramer_v(tr[a_], tr[b_]))]:
+        for i, a_ in enumerate(grupo):
+            for b_ in grupo[i + 1:]:
+                rho = medir(a_, b_)
+                if pd.notna(rho) and abs(rho) > RHO_MAX:
+                    hi_, lo_ = (a_, b_) if iv_[a_] >= iv_[b_] else (b_, a_)
+                    if hi_ in finales and lo_ not in finales:
+                        res = f"Conserva {hi_} · excluye {lo_}"
+                    elif hi_ not in finales and lo_ not in finales:
+                        res = "Ambas excluidas por otra variable de mayor IV"
+                    elif hi_ not in finales:
+                        res = f"Conserva {lo_} · {hi_} ya había salido por otra variable"
+                    else:
+                        res = "Ambas se conservan"
+                    # ¿El criterio anterior (mayor Gini) habría elegido distinto en este par?
+                    g_hi = a_ if gini_[a_] >= gini_[b_] else b_
+                    pares.append({"medida": "Spearman" if grupo is num else "V de Cramér", "variable_1": a_, "variable_2": b_,
+                                  "rho": float(rho), "iv_1": float(iv_[a_]), "iv_2": float(iv_[b_]),
+                                  "gini_1": float(gini_[a_]), "gini_2": float(gini_[b_]),
+                                  "gini_elegiria_otra": g_hi != hi_, "resultado": res})
+    sel = [{"variable": v, "tipo": cand.set_index("variable").loc[v, "tipo"], "iv": float(iv_[v]), "gini": float(gini_[v]),
+            "seleccionada": v in finales, "redundante_con": motivo.get(v, ""), "medida_redundancia": medida.get(v, np.nan),
+            "familia": cand.set_index("variable").loc[v, "familia"]} for v in cand["variable"]]
+    cl = corr.stack().reset_index()
+    cl.columns = ["v1", "v2", "rho"]
+    guardar("multivariado_pares", pd.DataFrame(pares))
+    guardar("multivariado_seleccion", pd.DataFrame(sel))
+    guardar("multivariado_corr", cl)
+    print(fu["decision"].value_counts().to_dict(), "| bivariado (IV ≥ 0.05):", int(bi["pasa"].sum()), "→ multivariado:", len(finales))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -575,6 +538,8 @@ FEATURES_PROPUESTAS = {
 
 
 def etapa_datasets() -> None:
+    """Dataset de entrenamiento ÚNICO (las variables que salen del multivariado) en dos versiones que solo difieren en el
+    balance del TARGET: original (8 % de default) y rebalanceada con SMOTE-NC. Test no se toca."""
     import joblib
     from imblearn.over_sampling import SMOTENC
     from optbinning import OptimalBinning
@@ -588,42 +553,15 @@ def etapa_datasets() -> None:
     sel = leer("multivariado_seleccion")
     tipos = tipos_variables().set_index("variable")
     grupos = leer("grupos_cardinalidad")
-    fichas, resumen = [], []
+    v_fin = sel.query("seleccionada").sort_values("iv", ascending=False)["variable"].tolist()
+    iv_de = sel.set_index("variable")["iv"]
 
-    # ── 4.1 Logística: WoE de OptBinning ajustado en train (guía, Paso 8) ──
-    v_log = sel.query("dataset == 'logistica' and seleccionada").sort_values("metrica", ascending=False)["variable"].tolist()
-    def woe(df):
-        out = pd.DataFrame({ID: df[ID], TARGET: df[TARGET]})
-        for v in v_log:
-            ob = bp.get_binned_variable(v)
-            out[f"WOE_{v}"] = ob.transform(a_objeto(df[v]), metric="woe", metric_missing="empirical", metric_special="empirical")
-        return out
-    log_tr, log_te = woe(tr), woe(te)
-    log_tr.to_parquet(DATASETS / "logistica_train.parquet", index=False)
-    log_te.to_parquet(DATASETS / "logistica_test.parquet", index=False)
-    for v in v_log:
-        fichas.append({"dataset": "logistica", "columna": f"WOE_{v}", "variable": v, "tipo": tipos.loc[v, "tipo"],
-                       "transformacion": "WoE (OptBinning, train)", "metrica": float(sel.query("dataset=='logistica' and variable==@v")["metrica"].iloc[0]),
-                       "familia": tipos.loc[v, "familia"], "pct_nulos_train": float(tr[v].isna().mean())})
-    W = log_tr[[f"WOE_{v}" for v in v_log]].to_numpy()
-    vif = []
-    for j in range(W.shape[1]):
-        otros = np.delete(W, j, axis=1)
-        Xo = np.c_[np.ones(len(W)), otros]
-        beta = np.linalg.lstsq(Xo, W[:, j], rcond=None)[0]
-        r2 = 1 - ((W[:, j] - Xo @ beta) ** 2).sum() / ((W[:, j] - W[:, j].mean()) ** 2).sum()
-        vif.append({"columna": f"WOE_{v_log[j]}", "vif": 1 / (1 - r2) if r2 < 1 else np.inf})
-    guardar("logistica_vif", pd.DataFrame(vif))
-    guardar("logistica_corr_woe", log_tr[[f"WOE_{v}" for v in v_log]].corr().stack().reset_index()
-            .set_axis(["v1", "v2", "rho"], axis=1))
-
-    # ── 4.2 ML: variables originales; categóricas agrupadas; nulos → mediana + indicador; SMOTE-NC solo en train ──
-    v_ml = sel.query("dataset == 'ml' and seleccionada").sort_values("metrica", ascending=False)["variable"].tolist()
+    # ── 4.1 Columnas del dataset: categóricas agrupadas; nulos → mediana de train + indicador (SMOTE no acepta nulos) ──
     mapa_grupo = {v: dict(zip(g["categoria"], g["grupo"])) for v, g in grupos.groupby("variable")}
     medianas, indicadores, categoricas = {}, [], []
     def preparar(df, ajustar=False):
         out = pd.DataFrame(index=df.index)
-        for v in v_ml:
+        for v in v_fin:
             s_ = df[v]
             if v in mapa_grupo:
                 out[v] = s_.map(mapa_grupo[v]).where(s_.notna(), "Sin dato").fillna("Sin dato").astype(str)
@@ -648,8 +586,10 @@ def etapa_datasets() -> None:
     X_te = preparar(te)
     binarias = [c for c in X_tr.columns if c.endswith("__nulo")]
     cat_cols = list(dict.fromkeys(categoricas + binarias))
-    pd.concat([tr[[ID, TARGET]], X_tr], axis=1).to_parquet(DATASETS / "ml_train.parquet", index=False)
-    pd.concat([te[[ID, TARGET]], X_te], axis=1).to_parquet(DATASETS / "ml_test.parquet", index=False)
+    pd.concat([tr[[ID, TARGET]], X_tr], axis=1).to_parquet(DATASETS / "train_original.parquet", index=False)
+    pd.concat([te[[ID, TARGET]], X_te], axis=1).to_parquet(DATASETS / "test.parquet", index=False)
+
+    # ── 4.2 Versión rebalanceada: SMOTE-NC solo sobre train ──
     idx_cat = [X_tr.columns.get_loc(c) for c in cat_cols]
     sm = SMOTENC(categorical_features=idx_cat, sampling_strategy=1.0, k_neighbors=5, random_state=SEMILLA)
     Xs, ys = sm.fit_resample(X_tr, tr[TARGET])
@@ -667,26 +607,48 @@ def etapa_datasets() -> None:
     enteras = [c for c in X_tr.columns if c not in cat_cols and bool((X_tr[c] % 1 == 0).all())]
     Xs[enteras] = Xs[enteras].round()
     guardar("smote_correcciones", pd.DataFrame({"tipo": ["Indicador de nulo = 1 → valor = mediana", "Conteos redondeados a entero"],
-                                                "variables": [", ".join(indicadores), ", ".join(enteras)]}))
+                                                "variables": [", ".join(indicadores) or "—", ", ".join(enteras) or "—"]}))
     ml_s = pd.concat([pd.DataFrame({ID: np.r_[tr[ID].to_numpy(dtype=float), np.full(sint.sum(), np.nan)],
                                     TARGET: np.asarray(ys), "es_sintetica": sint}), Xs.reset_index(drop=True)], axis=1)
-    ml_s.to_parquet(DATASETS / "ml_train_smote.parquet", index=False, compression="zstd")
+    ml_s.to_parquet(DATASETS / "train_smote.parquet", index=False, compression="zstd")
+
+    fichas = []
     for c in X_tr.columns:
         base = c.replace("__nulo", "")
-        fichas.append({"dataset": "ml", "columna": c, "variable": base, "tipo": "dicotómica" if c in binarias else tipos.loc[base, "tipo"],
+        fichas.append({"columna": c, "variable": base, "tipo": "dicotómica" if c in binarias else tipos.loc[base, "tipo"],
                        "transformacion": ("Indicador de nulo (creado)" if c in binarias else
                                           "Agrupada por tasa de default" if base in mapa_grupo else
                                           f"Original · nulo → mediana ({fmt(medianas[base])})" if base in indicadores else
                                           "Original · categórica" if base in categoricas and es_texto(tr[base]) else "Original"),
-                       "metrica": float(sel.query("dataset=='ml' and variable==@base")["metrica"].iloc[0]),
+                       "iv": float(iv_de[base]), "gini": float(sel.set_index("variable").loc[base, "gini"]),
                        "familia": tipos.loc[base, "familia"], "pct_nulos_train": float(tr[base].isna().mean())})
     guardar("dataset_features", pd.DataFrame(fichas))
 
-    for nombre, df_, y_ in [("Logística · train", log_tr, log_tr[TARGET]), ("Logística · test", log_te, log_te[TARGET]),
-                            ("ML · train (original)", X_tr, tr[TARGET]), ("ML · train (SMOTE)", Xs, pd.Series(ys)),
-                            ("ML · test", X_te, te[TARGET])]:
-        n_feat = df_.shape[1] - (2 if nombre.startswith("Logística") else 0)
-        resumen.append({"dataset": nombre, "filas": len(df_), "columnas": n_feat, "n_default": int(y_.sum()),
+    # ── 4.3 Vista WoE: cómo verá la regresión logística esas mismas variables (el WoE trata el nulo como tramo propio) ──
+    def woe(df):
+        out = pd.DataFrame({ID: df[ID], TARGET: df[TARGET]})
+        for v in v_fin:
+            ob = bp.get_binned_variable(v)
+            out[f"WOE_{v}"] = ob.transform(a_objeto(df[v]), metric="woe", metric_missing="empirical", metric_special="empirical")
+        return out
+    log_tr, log_te = woe(tr), woe(te)
+    log_tr.to_parquet(DATASETS / "woe_train.parquet", index=False)
+    log_te.to_parquet(DATASETS / "woe_test.parquet", index=False)
+    W = log_tr[[f"WOE_{v}" for v in v_fin]].to_numpy()
+    vif = []
+    for j in range(W.shape[1]):
+        otros = np.delete(W, j, axis=1)
+        Xo = np.c_[np.ones(len(W)), otros]
+        beta = np.linalg.lstsq(Xo, W[:, j], rcond=None)[0]
+        r2 = 1 - ((W[:, j] - Xo @ beta) ** 2).sum() / ((W[:, j] - W[:, j].mean()) ** 2).sum()
+        vif.append({"columna": f"WOE_{v_fin[j]}", "vif": 1 / (1 - r2) if r2 < 1 else np.inf})
+    guardar("woe_vif", pd.DataFrame(vif))
+    guardar("woe_corr", log_tr[[f"WOE_{v}" for v in v_fin]].corr().stack().reset_index().set_axis(["v1", "v2", "rho"], axis=1))
+    guardar("muestra_woe", log_tr.head(25))
+
+    resumen = []
+    for nombre, df_, y_ in [("Train original", X_tr, tr[TARGET]), ("Train SMOTE", Xs, pd.Series(ys)), ("Test", X_te, te[TARGET])]:
+        resumen.append({"dataset": nombre, "filas": len(df_), "columnas": df_.shape[1], "n_default": int(y_.sum()),
                         "n_paga": int(len(y_) - y_.sum()), "tasa_default": float(y_.mean()),
                         "sinteticas": int(sint.sum()) if "SMOTE" in nombre else 0})
     guardar("dataset_resumen", pd.DataFrame(resumen))
@@ -716,13 +678,12 @@ def etapa_datasets() -> None:
             vc = datos.astype(str).value_counts(normalize=True)
             cat_comp += [{"variable": c, "serie": serie, "categoria": k, "pct": float(p)} for k, p in vc.items()]
     guardar("smote_categoricas", pd.DataFrame(cat_comp))
-    guardar("muestra_logistica", log_tr.head(25))
-    muestra_ml = pd.concat([ml_s[~ml_s["es_sintetica"]].head(12), ml_s[ml_s["es_sintetica"]].head(13)])
-    guardar("muestra_ml", muestra_ml.astype({c: str for c in muestra_ml.columns if muestra_ml[c].dtype == object}))
+    muestra = pd.concat([ml_s[~ml_s["es_sintetica"]].head(12), ml_s[ml_s["es_sintetica"]].head(13)])
+    guardar("muestra_dataset", muestra.astype({c: str for c in muestra.columns if muestra[c].dtype == object}))
 
-    # ── 4.3 Espacio de feature engineering (propuestas; NO entran a los datasets) ──
+    # ── 4.4 Espacio de feature engineering (propuestas; NO entran al dataset) ──
     fe = []
-    finales_ml = [v for v in v_ml if not es_texto(tr[v])]
+    finales_num = [v for v in v_fin if not es_texto(tr[v])]
     for nombre, (formula, f, lectura) in FEATURES_PROPUESTAS.items():
         x_tr = f(tr).replace([np.inf, -np.inf], np.nan)
         x_te = f(te).replace([np.inf, -np.inf], np.nan)
@@ -732,14 +693,13 @@ def etapa_datasets() -> None:
         w_tr = ob.transform(x_tr.to_numpy(), metric="woe", metric_missing="empirical")
         w_te = ob.transform(x_te.to_numpy(), metric="woe", metric_missing="empirical")
         rx = x_tr.rank()
-        rho = {v: abs(rx.corr(tr[v].rank())) for v in finales_ml}     # Spearman = Pearson de los rangos (nulos por pares)
+        rho = {v: abs(rx.corr(tr[v].rank())) for v in finales_num}     # Spearman = Pearson de los rangos (nulos por pares)
         top = max(rho, key=rho.get)
         bt = ob.binning_table.build()
         bt = bt[(bt.index != "Totals") & (bt["Count"] > 0)]
         fe.append({"feature": nombre, "formula": formula, "lectura": lectura, "iv": iv,
                    "gini": float(2 * roc_auc_score(tr[TARGET], -w_tr) - 1), "gini_test": float(2 * roc_auc_score(te[TARGET], -w_te) - 1),
-                   "max_rho_seleccionadas": rho[top], "variable_mas_correlacionada": top,
-                   "pasaria_logistica": iv >= IV_MIN, "pasaria_ml": float(2 * roc_auc_score(tr[TARGET], -w_tr) - 1) >= GINI_MIN,
+                   "max_rho_seleccionadas": rho[top], "variable_mas_correlacionada": top, "pasaria": iv >= IV_MIN,
                    "tramos": " | ".join(f"{b}: {r:.1%}" for b, r in zip(bt["Bin"].astype(str), bt["Event rate"]))})
     guardar("feature_engineering", pd.DataFrame(fe))
     print(pd.DataFrame(resumen).to_string())

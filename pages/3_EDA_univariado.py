@@ -64,7 +64,7 @@ def fam_corta(f: str) -> str:
 # Lectura de negocio: qué se espera de cada variable (sirve para decir si la forma observada es "consistente")
 ESPERADO = {
     "AMT_INCOME_TOTAL": "Ingresos: se espera sesgo a la derecha (muchos ingresos medios, pocos muy altos), típico de una lognormal. "
-                        "Los 278 ingresos > 900 mil (máximo 117 M) se reasignaron al tramo alto con su misma tasa de default; la cola que queda es real.",
+                        "Los ingresos absurdos (117 M, 18 M…: 18 créditos sobre 2.7 M) se eliminaron y el resto se capeó en 900 mil (p99.9 de train); la cola que queda es real.",
     "AMT_CREDIT": "Monto del crédito: sesgo a la derecha y picos en montos redondos (450 mil, 675 mil…), propios de productos "
                   "estandarizados. Consistente con lo esperado.",
     "AMT_ANNUITY": "Cuota: sigue al monto del crédito, con sesgo a la derecha. Los picos son cuotas de productos estándar.",
@@ -78,7 +78,7 @@ ESPERADO = {
     "DAYS_REGISTRATION": "Antigüedad del registro del domicilio: cola larga hacia registros antiguos. Esperable.",
     "DAYS_ID_PUBLISH": "Antigüedad del documento de identidad: forma irregular porque la renovación sigue reglas por edad.",
     "OWN_CAR_AGE": "Edad del auto (solo quienes tienen auto): autos mayormente nuevos o de pocos años. El bloque anómalo de 64–65 "
-                   "años y los de 91 se reasignaron a 16 años, el tramo con su misma tasa de default; ya no hay un pico artificial en 30.",
+                   "años (código de relleno) pasó a nulo y la cola se capeó en 42 años (p99.9 de train); ya no hay picos artificiales.",
     "CNT_CHILDREN": "Hijos: conteo con la mayoría en 0; la binomial negativa captura la sobredispersión frente a Poisson.",
     "CNT_FAM_MEMBERS": "Miembros de la familia: conteo con moda en 2 (pareja). Muy concentrado; poca dispersión.",
     "HOUR_APPR_PROCESS_START": "Hora de la solicitud: forma de campana alrededor del mediodía, horario comercial. Es operativa, no "
@@ -120,10 +120,12 @@ etiqueta = c_p.segmented_control("Pasada", list(PASADAS), default=list(PASADAS)[
                                       "preprocesamiento, para verificar que las transformaciones funcionaron).")
 P = PASADAS[etiqueta or list(PASADAS)[0]]
 c_i.caption("**Ex-post** (por defecto) es la base con la que se modelará. **Ex-ante** muestra el dato de origen, antes de imputar y "
-            "topear. La clasificación de tipos se fija con el tablón original (regla del notebook: numérica con ≤ 5 valores → "
+            "capear. La clasificación de tipos se fija con el tablón original (regla del notebook: numérica con ≤ 5 valores → "
             "categórica) para que el tratamiento no cambie el tipo de una variable.")
 
 num = t("num_metricas").query("pasada == @P").merge(tipos[["variable", "familia", "orden", "descripcion"]], on="variable")
+_post = t("num_metricas").query("pasada == 'ex-post'")
+VAR_ASIM_POST = _post.loc[_post["asimetria"].abs().idxmax(), "variable"]
 cat = t("cat_metricas").query("pasada == @P").merge(tipos[["variable", "familia", "orden"]], on="variable")
 dic = t("dic_metricas").query("pasada == @P").merge(tipos[["variable", "familia", "orden"]], on="variable")
 k1, k2, k3, k4, k5 = st.columns(5)
@@ -211,8 +213,9 @@ with tab_pan:
                  alt.Tooltip("pct_ceros:Q", format=".1%", title="% ceros")])
         .properties(title="% de outliers (regla 1.5·IQR): top 30"), width="stretch", height=640)
     nota("Un «outlier» por la regla 1.5·IQR no es un error. En variables con muchos ceros el IQR es 0 y **cualquier valor positivo** "
-         "queda fuera de los bigotes: por eso los atrasos y las consultas aparecen arriba. Los errores reales ya se trataron en "
-         "*Calidad y preprocesamiento*; lo que queda es forma de la distribución.")
+         "queda fuera de los bigotes de Tukey: por eso los atrasos y las consultas aparecen arriba, y el capeo no cambia este conteo. "
+         "Los valores sin sentido se trataron en *Calidad y preprocesamiento*; lo que queda es forma de la distribución. Por eso el "
+         "boxplot de cada ficha dibuja los bigotes en los **percentiles del capeo (0.1 y 99.9)**.")
 
     st.subheader("Verificación ex-ante vs ex-post")
     st.caption("Guía, Paso 4, precisión (b): ¿se redujo el % de missing?, ¿se controlaron los outliers?, ¿se redujo la cardinalidad?")
@@ -233,10 +236,11 @@ with tab_pan:
     with v2:
         st.markdown(
             "- **Missing**: bajó de 25.1 % a 23.9 % de celdas; el resto son nulos **estructurales** que se conservaron a propósito.\n"
-            f"- **Outliers**: la asimetría máxima cae de **{v.loc['ex-ante', 'asim_max']:.1f}** (`AMT_INCOME_TOTAL`) a **{v.loc['ex-post', 'asim_max']:.1f}** (`BUREAU_DEUDA_TOTAL`, sin tratar). "
-            "El conteo de variables asimétricas no cambia: su asimetría es forma, no error.\n"
+            f"- **Outliers**: la asimetría máxima cae de **{v.loc['ex-ante', 'asim_max']:.1f}** (`AMT_INCOME_TOTAL`) a **{v.loc['ex-post', 'asim_max']:.1f}** "
+            f"(`{VAR_ASIM_POST}`, atrasos con masa en cero). Tras el capeo no queda ningún punto fuera de los bigotes p0.1–p99.9; el conteo "
+            "de variables asimétricas casi no cambia, porque su asimetría es forma, no error.\n"
             "- **Centinela**: `DAYS_EMPLOYED = 365243` ya no existe.\n"
-            "- **Cardinalidad**: no se redujo (58 en `ORGANIZATION_TYPE`); los 55,374 `XNA` que quedan son la categoría real "
+            "- **Cardinalidad**: no se redujo (58 en `ORGANIZATION_TYPE`); los ≈ 55 mil `XNA` que quedan son la categoría real "
             "*sin empleador*. Agrupar categorías es tarea del bivariado, con su tasa de default."
         )
 
@@ -369,29 +373,41 @@ with tab_num:
 
         # Boxplot, en gráfico aparte
         caja = pd.DataFrame([{"y": 0, **b0.to_dict()}])
+        blo, bhi = float(b0.vista_min), float(b0.vista_max)
+        pad = (bhi - blo) * 0.02 or 1.0
+        blo, bhi = blo - pad, bhi + pad
         yb = alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[-1, 1]))
-        xb = alt.X("valor:Q", title=var, scale=alt.Scale(domain=[lo, hi], nice=False, clamp=True))
-        cap = caja.assign(bi=caja.bigote_inf.clip(lo, hi), bs=caja.bigote_sup.clip(lo, hi))
+        xb = alt.X("valor:Q", title=var, scale=alt.Scale(domain=[blo, bhi], nice=False, clamp=True))
+        cap = caja.assign(bi=caja.bigote_inf, bs=caja.bigote_sup)
         capa_bigote = alt.Chart(cap).mark_rule(color=AZUL, strokeWidth=1.5).encode(
-            x=alt.X("bi:Q", scale=alt.Scale(domain=[lo, hi], nice=False), title=var), x2="bs:Q", y=yb)
+            x=alt.X("bi:Q", scale=alt.Scale(domain=[blo, bhi], nice=False), title=var), x2="bs:Q", y=yb)
+        capa_topes = alt.Chart(pd.concat([cap.assign(x=cap.bi), cap.assign(x=cap.bs)])).mark_tick(color=AZUL, thickness=2, size=26).encode(
+            x=alt.X("x:Q", scale=alt.Scale(domain=[blo, bhi], nice=False)), y=yb)
         capa_caja = alt.Chart(cap).mark_bar(color=AZUL, opacity=0.35, size=60, stroke=AZUL, strokeWidth=1).encode(
-            x=alt.X("q1:Q", scale=alt.Scale(domain=[lo, hi], nice=False)), x2="q3:Q", y=yb,
+            x=alt.X("q1:Q", scale=alt.Scale(domain=[blo, bhi], nice=False)), x2="q3:Q", y=yb,
             tooltip=[alt.Tooltip("q1:Q", format=",.4g", title="Q1"), alt.Tooltip("mediana:Q", format=",.4g", title="Mediana"),
                      alt.Tooltip("q3:Q", format=",.4g", title="Q3"), alt.Tooltip("bigote_inf:Q", format=",.4g", title="Bigote inferior"),
                      alt.Tooltip("bigote_sup:Q", format=",.4g", title="Bigote superior")])
         capa_med = alt.Chart(cap).mark_tick(color=TINTA, thickness=3, size=60).encode(
-            x=alt.X("mediana:Q", scale=alt.Scale(domain=[lo, hi], nice=False)), y=yb)
+            x=alt.X("mediana:Q", scale=alt.Scale(domain=[blo, bhi], nice=False)), y=yb)
         capa_media = alt.Chart(cap).mark_point(shape="diamond", filled=True, size=110, color=TINTA).encode(
-            x=alt.X("media:Q", scale=alt.Scale(domain=[lo, hi], nice=False)), y=yb,
+            x=alt.X("media:Q", scale=alt.Scale(domain=[blo, bhi], nice=False)), y=yb,
             tooltip=[alt.Tooltip("media:Q", format=",.4g", title="Media")])
-        capas = capa_bigote + capa_caja + capa_med + capa_media
+        capas = capa_bigote + capa_topes + capa_caja + capa_med + capa_media
         if len(pts):
             capas = alt.Chart(pts).mark_circle(size=12, color=AZUL, opacity=0.35).encode(
                 x=xb, y=alt.Y("jitter:Q", axis=None, scale=alt.Scale(domain=[-1, 1])),
                 tooltip=[alt.Tooltip("valor:Q", format=",.4g", title="Valor")]) + capas
+        bigotes = "límites del capeo (p0.1 y p99.9 de train)" if P == "ex-post" else "percentiles 0.1 y 99.9"
         st.altair_chart(capas.properties(title={"text": f"{var}: boxplot", "subtitle":
-                        f"Fuera de los bigotes (1.5·IQR): {int(b0.n_fuera):,} créditos ({b0.n_fuera / m.n_validos:.1%}) · ◆ media · | mediana"}),
+                        f"Bigotes: {bigotes} · fuera: {int(b0.n_fuera):,} créditos · ◆ media · | mediana"}),
                         width="stretch", height=190)
+        st.caption(f"Convención acordada con la profesora: los bigotes llegan a los percentiles del capeo. "
+                   + ("En la pasada ex-post no queda ningún punto fuera. " if P == "ex-post" else
+                      "En la pasada ex-ante, los puntos (muestra de hasta 500; los que exceden el eje se dibujan en el borde) son los "
+                      "valores que se capearon o eliminaron. ")
+                   + f"Con la regla de Tukey (1.5·IQR) quedarían {int(b0.n_fuera_tukey):,} créditos afuera "
+                   f"({b0.n_fuera_tukey / m.n_validos:.1%}): describe la forma de la distribución, no errores.")
 
         z1, z2 = st.columns([3, 2], gap="large")
         with z1:
@@ -638,9 +654,9 @@ with tab_hal:
     with o3, st.container(border=True):
         st.markdown(
             "**3 · Outliers relevantes**\n\n"
-            "- Tras la reasignación, los outliers que quedan son **forma, no error**: están en variables de historial cuyo IQR es 0 por la "
-            "concentración en cero.\n"
-            "- `BUREAU_DEUDA_TOTAL` (asimetría 38.6) es la más extrema; no se trató porque su cola tiene señal (ver *Calidad*).\n"
+            "- Tras eliminar lo absurdo y capear en p0.1–p99.9, lo que la regla de Tukey sigue marcando es **forma, no error**: "
+            "variables de historial cuyo IQR es 0 por la concentración en cero.\n"
+            f"- La más asimétrica ex-post es `{VAR_ASIM_POST}`: masa en cero y una cola real de días de atraso.\n"
             "- `DAYS_EMPLOYED` ex-post tiene un **pico artificial en 0** (18 %) por el reemplazo del centinela.")
     with o4, st.container(border=True):
         st.markdown(
@@ -656,13 +672,14 @@ with tab_hal:
         "en el mismo valor que quien recién empezó a trabajar (≈ 10.7 %). En el bivariado esto se ve: el patrón de `DAYS_EMPLOYED` "
         "por `qcut` es **no lineal (∩)** en vez de monótono. ¿Conviene que el 0 sea un tramo propio o que `flag_sin_empleo` acompañe "
         "a la variable?\n"
-        "2. **La regla de tipos y los outliers.** Tras reasignar atípicos, `CNT_CHILDREN` y `AMT_REQ_CREDIT_BUREAU_QRT` quedan con 5 "
+        "2. **La regla de tipos y los outliers.** Tras capear en 4, `CNT_CHILDREN` y `AMT_REQ_CREDIT_BUREAU_QRT` quedan con 5 "
         "valores y la regla del notebook (≤ 5 → categórica) las cambiaría de tipo. Se mantuvieron numéricas: ¿un conteo debe "
         "cambiar de tipo por un tratamiento?\n"
         "3. **log(1 + x) no sirve en [0, 1].** La regla del notebook marca 31 variables de vivienda para la vista log, pero en ese rango "
         "la transformación casi no cambia la forma. Si se transforma, debe ser por evidencia, no por regla.\n"
-        "4. **`CODE_GENDER` como predictor.** Estadísticamente es una dicotómica bien balanceada y pasa el filtro de Gini; "
-        "regulatoriamente, usar el género en una decisión de crédito es discutible en muchas jurisdicciones. ¿Debe entrar al modelo?"
+        "4. **`CODE_GENDER` como predictor.** Estadísticamente es una dicotómica bien balanceada, aunque con IV 0.039 no llega al corte "
+        "de 0.05 del bivariado. Si hubiera pasado, ¿debería entrar? Usar el género en una decisión de crédito es discutible "
+        "regulatoriamente en muchas jurisdicciones."
     )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -674,14 +691,14 @@ with tab_fil:
     gr = pd.read_parquet(MOD / "grupos_cardinalidad.parquet")
     st.markdown(
         "Qué variables **entran al bivariado**. Los criterios los fijó el equipo con el feedback del asistente de docencia; el Gini "
-        "se calcula **solo con train** (70 %, estratificado), con los tramos supervisados de OptBinning y el nulo como tramo propio.")
+        "se calcula **solo con train** (80 %, estratificado), con los tramos supervisados de OptBinning y el nulo como tramo propio.")
     c1, c2, c3 = st.columns(3, gap="medium")
     with c1, st.container(border=True):
         st.markdown(":red-badge[Varianza casi nula]  \nUn valor concentra **≥ 99 %** de los datos no nulos (p. ej. los "
                     "`FLAG_DOCUMENT_*`). No hay variación que pueda separar clases.  \n**Decisión:** eliminar.")
     with c2, st.container(border=True):
-        st.markdown(":orange-badge[Nulos altos sin poder]  \nMás de **50 %** de nulos **y** Gini < **0.08** (el mismo umbral mínimo "
-                    "del dataset de ML). Si el Gini lo compensa, el nulo es informativo y se conserva.  \n**Decisión:** eliminar.")
+        st.markdown(":orange-badge[Nulos altos sin poder]  \nMás de **50 %** de nulos **y** Gini < **0.08** (equivale a IV ≈ 0.02, "
+                    "el inicio del rango «Weak»). Si el Gini lo compensa, el nulo es informativo y se conserva.  \n**Decisión:** eliminar.")
     with c3, st.container(border=True):
         st.markdown(":blue-badge[Alta cardinalidad]  \nMás de **15** categorías. Se **agrupan por tasa de default** (OptBinning "
                     "categórico, ≤ 5 grupos, ≥ 5 % por grupo). Si no hay grupos con default distinto, se elimina.  \n**Decisión:** agrupar.")

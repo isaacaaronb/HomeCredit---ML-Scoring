@@ -6,8 +6,9 @@ de ese notebook, para que la app no tenga que cargar tres tablones de 307,511 fi
 Entradas:
   artifacts/tablon_general.parquet     tablón oficial (antes del preprocesamiento)
   artifacts/tablon_imputado.parquet    tras el tratamiento de faltantes y centinelas (notebook)
-  artifacts/tablon_tratado.parquet     tras la reasignación de outliers (scripts/pipeline_modelado.py outliers)
-  artifacts/modelado/particion.parquet · outliers_reasignacion.parquet (la evidencia de outliers se calcula en train)
+  artifacts/tablon_tratado.parquet     tras el tratamiento de outliers (scripts/pipeline_modelado.py outliers):
+                                       OWN_CAR_AGE 64–65 → nulo, filas super extremas eliminadas y capeo p0.1–p99.9
+  artifacts/modelado/particion.parquet · outliers_*.parquet
   artifacts/parametros_imputacion.json · artifacts/parametros_outliers.json
   data_dictionary/diccionario_tablon.csv
 
@@ -20,7 +21,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 REPO = Path(__file__).resolve().parents[1]
 ART = REPO / "artifacts"
@@ -34,19 +34,8 @@ EDAD_CORTES = [0, 30, 40, 50, 60, 120]
 EDAD_ETIQ = ["≤30", "30-40", "40-50", "50-60", ">60"]
 UMBRALES = {"nulos_alto": 0.40, "casi_constante": 0.95, "asimetria": 2.0, "outliers": 0.05, "ceros": 0.50,
             "minoritaria": 0.01, "cardinalidad": 15, "rara": 0.01}
-PCTS = [95, 99, 99.9]
-PCT_PREVIO = {95: 90, 99: 95, 99.9: 99}
-CRITERIO = {
-    "AMT_INCOME_TOTAL": "Neutraliza el máximo (117 M); mantiene a los ingresos altos, cuya cola tiene menor default.",
-    "CNT_CHILDREN": "En p99 la cola difiere del tramo previo (pierde señal); en p99.9 no.",
-    "CNT_FAM_MEMBERS": "En p99 la cola difiere del tramo previo (pierde señal); en p99.9 no.",
-    "OBS_30_CNT_SOCIAL_CIRCLE": "Cola homogénea; neutraliza el valor 348 (el siguiente es 47).",
-    "OBS_60_CNT_SOCIAL_CIRCLE": "Cola homogénea; neutraliza el valor 344 (el siguiente es 47).",
-    "AMT_REQ_CREDIT_BUREAU_QRT": "Neutraliza el valor 261 (el siguiente es 19).",
-    "OWN_CAR_AGE": "64–65 años es un bloque de codificación y 91 es imposible; hasta 63 años es raro pero plausible.",
-}
-CANDIDATAS = ["BUREAU_DEUDA_TOTAL", "BUREAU_MAX_DIAS_ATRASO", "HC_POS_MAX_ATRASO", "HC_CARD_MAX_ATRASO",
-              "HC_PAY_MAX_ATRASO", "HC_CARD_MAX_UTILIZACION"]
+CURVAS = ["AMT_INCOME_TOTAL", "AMT_CREDIT", "CNT_CHILDREN", "OBS_30_CNT_SOCIAL_CIRCLE", "AMT_REQ_CREDIT_BUREAU_QRT",
+          "BUREAU_DEUDA_TOTAL", "HC_CARD_MAX_UTILIZACION", "BUREAU_N_CREDITOS", "OWN_CAR_AGE"]
 
 FAMILIAS_HISTORIAL = {
     "Buró": ["BUREAU_N_CREDITOS", "BUREAU_N_ACTIVOS", "BUREAU_DEUDA_TOTAL", "BUREAU_MAX_DIAS_ATRASO", "BUREAU_MESES_OBSERVADOS",
@@ -64,36 +53,6 @@ REPRESENTANTES = [("Buró (sin créditos)", "BUREAU_N_CREDITOS"), ("Consultas al
                   ("Auto (OWN_CAR_AGE)", "OWN_CAR_AGE"), ("Ocupación", "OCCUPATION_TYPE"),
                   ("EXT_SOURCE_1", "EXT_SOURCE_1"), ("EXT_SOURCE_3", "EXT_SOURCE_3"),
                   ("Vivienda (bloque completo)", "__vivienda__")]
-
-
-def tope(s: pd.Series, p: float) -> float:
-    """Percentil p (0-100) sobre los no nulos; en variables enteras devuelve un valor observado (igual que el notebook)."""
-    s = s.dropna()
-    entera = bool((s % 1 == 0).all())
-    return float(s.quantile(p / 100, interpolation="higher" if entera else "linear"))
-
-
-def logit_ll(x, y, it=30):
-    if x.std() == 0:                     # variable constante (p. ej. tope en p95 = 0): solo intercepto
-        p = np.clip(y.mean(), 1e-12, 1 - 1e-12)
-        return float((y * np.log(p) + (1 - y) * np.log(1 - p)).sum())
-    x = (x - x.mean()) / x.std()
-    xd = np.c_[np.ones(len(x)), x]
-    b = np.zeros(2)
-    for _ in range(it):
-        p = 1 / (1 + np.exp(-(xd @ b)))
-        w = p * (1 - p) + 1e-12
-        b = b + np.linalg.solve((xd * w[:, None]).T @ xd, xd.T @ (y - p))
-    p = np.clip(1 / (1 + np.exp(-(xd @ b))), 1e-12, 1 - 1e-12)
-    return float((y * np.log(p) + (1 - y) * np.log(1 - p)).sum())
-
-
-def auc(x, y):
-    r = stats.rankdata(x)
-    n1 = y.sum()
-    n0 = len(y) - n1
-    a = (r[y == 1].sum() - n1 * (n1 + 1) / 2) / (n1 * n0)
-    return max(a, 1 - a)
 
 
 def tasa(d, mask):
@@ -426,88 +385,67 @@ def main() -> None:
          all((imp.loc[df[c].notna(), c] == df.loc[df[c].notna(), c]).all() for c in imputadas if c != "CNT_FAM_MEMBERS")),
         ("Faltantes", "Solo cambiaron las columnas previstas", cambiaron == esperadas),
     ]
-    topes = p_out["umbrales"]
-    vars_out = list(topes)
-    cambio_out = {c for c in imp.columns if not imp[c].equals(trat[c])}
+    # Outliers (pipeline_modelado.py outliers): A) OWN_CAR_AGE 64–65 → nulo; B) filas super extremas eliminadas; C) capeo
+    lims = p_out["limites"]
+    borradas = set(p_out["filas_eliminadas"])
+    imp_q = imp[~imp["SK_ID_CURR"].isin(borradas)].reset_index(drop=True)          # imputado sin las filas eliminadas
+    trat_a = trat.set_index("SK_ID_CURR").loc[imp_q["SK_ID_CURR"]].reset_index()
+    relleno = imp_q["OWN_CAR_AGE"].isin(p_out["car_relleno"])
+    imp_r = imp_q.copy()
+    imp_r.loc[relleno, "OWN_CAR_AGE"] = np.nan                                         # tras el paso A, antes del capeo
+    dentro = {v: imp_r[v].between(lims[v]["inf"], lims[v]["sup"]) for v in lims}
+    cambio_out = {c for c in imp_q.columns if not imp_q[c].equals(trat_a[c])}
     val += [
-        ("Outliers", "Misma forma y columnas que el tablón imputado", trat.shape == imp.shape and list(trat.columns) == list(imp.columns)),
-        ("Outliers", "Solo cambiaron las variables tratadas", cambio_out == set(vars_out)),
-        ("Outliers", "Ningún valor supera su umbral", all(trat[v].max() <= topes[v] for v in vars_out)),
-        ("Outliers", "Cada atípico recibió el valor de su tramo destino",
-         all((trat.loc[imp[v] > topes[v], v] == p_out["valores_asignados"][v]).all() for v in vars_out)),
-        ("Outliers", "Nulos intactos", all(trat[v].isna().equals(imp[v].isna()) for v in vars_out)),
-        ("Outliers", "Valores ≤ umbral intactos", all(trat.loc[imp[v] <= topes[v], v].equals(imp.loc[imp[v] <= topes[v], v]) for v in vars_out)),
-        ("Outliers", "Reglas aprendidas solo con train (partición 70/30 estratificada, semilla 42)", p_out.get("aprendido_en") == "train"),
+        ("Outliers", f"Filas = imputado − {len(borradas)} eliminadas, y son exactamente las marcadas",
+         len(trat) == len(imp) - len(borradas) and not trat["SK_ID_CURR"].isin(borradas).any()),
+        ("Outliers", "Mismas columnas que el tablón imputado", list(trat.columns) == list(imp.columns)),
+        ("Outliers", "OWN_CAR_AGE: el bloque 64–65 pasó a nulo y no queda ninguno",
+         not trat["OWN_CAR_AGE"].isin(p_out["car_relleno"]).any()
+         and int(trat_a["OWN_CAR_AGE"].isna().sum()) == int(imp_q["OWN_CAR_AGE"].isna().sum() + relleno.sum())),
+        ("Outliers", "Solo cambiaron variables numéricas", cambio_out <= set(lims)),
+        ("Outliers", "Ningún valor fuera de los límites de capeo (p0.1–p99.9 de train)",
+         all(trat[v].dropna().between(lims[v]["inf"], lims[v]["sup"]).all() for v in lims)),
+        ("Outliers", "Valores dentro de los límites intactos",
+         all(trat_a.loc[dentro[v], v].equals(imp_r.loc[dentro[v], v]) for v in lims)),
+        ("Outliers", "Nulos intactos (salvo el bloque de OWN_CAR_AGE)", all(trat_a[v].isna().equals(imp_r[v].isna()) for v in lims)),
+        ("Outliers", "Límites aprendidos solo con train (partición 80/20 estratificada, semilla 42)",
+         p_out.get("aprendido_en") == "train" and p_out.get("test_size") == 0.2),
         ("Outliers", "Coherencia miembros ≥ hijos + 1 no empeora",
          int((trat["CNT_FAM_MEMBERS"] < trat["CNT_CHILDREN"] + 1).sum()) <= int((imp["CNT_FAM_MEMBERS"] < imp["CNT_CHILDREN"] + 1).sum())),
     ]
     guardar("validaciones", pd.DataFrame(val, columns=["etapa", "verificacion", "ok"]))
     res["celdas_nulas_antes"] = int(df.isna().sum().sum())
     res["celdas_nulas_despues"] = int(trat[df.columns].isna().sum().sum())
+    res["filas_post"] = int(len(trat))
+    res["filas_eliminadas"] = int(len(borradas))
+    res["ingreso_original"] = {"std": float(imp["AMT_INCOME_TOTAL"].std()), "asim": float(imp["AMT_INCOME_TOTAL"].skew()),
+                               "max": float(imp["AMT_INCOME_TOTAL"].max())}
+    res["ingreso_tratado"] = {"std": float(trat["AMT_INCOME_TOTAL"].std()), "asim": float(trat["AMT_INCOME_TOTAL"].skew()),
+                              "max": float(trat["AMT_INCOME_TOTAL"].max())}
 
-    # ══ 4. OUTLIERS (evidencia sobre train: usa el TARGET) ══════════════════════
-    part = pd.read_parquet(ART / "modelado" / "particion.parquet").set_index("SK_ID_CURR")["muestra"]
-    imp_full = imp
-    imp = imp[imp["SK_ID_CURR"].map(part) == "train"]
-    y_all = imp["TARGET"]
-    filas_colas, filas_def, filas_ev, filas_curva = [], [], [], []
-    qgrid = np.linspace(0.90, 1.0, 201)
-    for v in vars_out + CANDIDATAS:
-        estado_v = "Tratada" if v in vars_out else "Candidata (sin tratar)"
-        s = imp[v].dropna()
-        t = {p: tope(s, p) for p in PCTS}
-        filas_colas.append({"variable": v, "estado": estado_v, "mediana": s.median(), "p95": t[95], "p99": t[99], "p99.9": t[99.9],
-                            "max": s.max(), "max_sobre_p999": s.max() / t[99.9] if t[99.9] > 0 else np.nan})
-        yy = y_all[s.index]
-        masks = [s <= t[95], (s > t[95]) & (s <= t[99]), (s > t[99]) & (s <= t[99.9]), s > t[99.9]]
-        for et, m in zip(["≤ p95", "p95–99", "p99–99.9", "> p99.9"], masks):
-            filas_def.append({"variable": v, "estado": estado_v, "tramo": et, "n": int(m.sum()),
-                              "tasa": float(yy[m].mean()) if m.sum() >= 20 else np.nan})
-        x = s.values.astype(float)
-        yv = yy.values.astype(float)
-        ll0, auc0 = logit_ll(x, yv), auc(x, yv)
-        for p in PCTS:
-            cap, previo = tope(s, p), tope(s, PCT_PREVIO[p])
-            cola, tramo_p = yv[x > cap], yv[(x > previo) & (x <= cap)]
-            p_val = np.nan
-            if len(cola) >= 20 and len(tramo_p) >= 20:
-                try:
-                    p_val = stats.chi2_contingency([[tramo_p.sum(), len(tramo_p) - tramo_p.sum()],
-                                                    [cola.sum(), len(cola) - cola.sum()]])[1]
-                except ValueError:
-                    pass
-            xc = np.minimum(x, cap)
-            filas_ev.append({"variable": v, "estado": estado_v, "percentil": p, "tope": cap, "n_afectados": len(cola),
-                             "pct_no_nulos": len(cola) / len(x), "default_tramo_previo": tramo_p.mean() if len(tramo_p) else np.nan,
-                             "default_cola": cola.mean() if len(cola) else np.nan, "p_valor": p_val,
-                             "delta_logL": logit_ll(xc, yv) - ll0, "delta_AUC": auc(xc, yv) - auc0})
-        antes = s.quantile(qgrid).values
-        despues = trat.loc[imp.index, v].dropna().quantile(qgrid).values if v in vars_out else [np.nan] * len(qgrid)
-        filas_curva += [{"variable": v, "estado": estado_v, "percentil": q * 100, "antes": a, "despues": d}
-                        for q, a, d in zip(qgrid, antes, despues)]
-    guardar("colas", pd.DataFrame(filas_colas))
-    guardar("default_por_cola", pd.DataFrame(filas_def))
-    guardar("evidencia_topes", pd.DataFrame(filas_ev))
-    guardar("curvas_cola", pd.DataFrame(filas_curva))
-
-    s = imp["OWN_CAR_AGE"].dropna()
+    # ══ 4. OUTLIERS ═════════════════════════════════════════════════════════════
+    MOD = ART / "modelado"
+    for nombre in ["outliers_relleno", "outliers_eliminacion", "outliers_capeo", "outliers_filas_eliminadas"]:
+        guardar(nombre, pd.read_parquet(MOD / f"{nombre}.parquet"))
+    part = pd.read_parquet(MOD / "particion.parquet").set_index("SK_ID_CURR")["muestra"]
+    tr_imp = imp[imp["SK_ID_CURR"].map(part) == "train"]
+    s = tr_imp["OWN_CAR_AGE"].dropna()
+    y_tr = tr_imp["TARGET"]
     tramos = [(0, 5), (6, 10), (11, 15), (16, 20), (21, 25), (26, 30), (31, 40), (41, 50), (51, 63), (64, 64), (65, 65), (66, 200)]
     etq = ["0-5", "6-10", "11-15", "16-20", "21-25", "26-30", "31-40", "41-50", "51-63", "64", "65", "66+"]
     guardar("own_car_age", pd.DataFrame([{"tramo": e, "n": int(((s >= a) & (s <= b)).sum()),
-                                          "tasa": float(y_all[s.index][(s >= a) & (s <= b)].mean()) if ((s >= a) & (s <= b)).sum() >= 100 else np.nan,
+                                          "tasa": float(y_tr[s.index][(s >= a) & (s <= b)].mean()) if ((s >= a) & (s <= b)).sum() >= 100 else np.nan,
                                           "bloque": e in ("64", "65")} for (a, b), e in zip(tramos, etq)]))
-
-    reas = pd.read_parquet(ART / "modelado" / "outliers_reasignacion.parquet")
-    reas["criterio_negocio"] = reas["variable"].map(CRITERIO)
-    guardar("plan_outliers", reas)
-    guardar("outliers_tramos", pd.read_parquet(ART / "modelado" / "outliers_tramos.parquet"))
-    imp = imp_full
-    guardar("efecto_outliers", pd.DataFrame([{"variable": v, "umbral": topes[v], "valor_asignado": p_out["valores_asignados"][v],
-                                              "n_modificados": int((imp[v] > topes[v]).sum()),
-                                              "max_antes": imp[v].max(), "max_despues": trat[v].max(),
-                                              "media_antes": imp[v].mean(), "media_despues": trat[v].mean(),
-                                              "std_antes": imp[v].std(), "std_despues": trat[v].std(),
-                                              "asim_antes": imp[v].skew(), "asim_despues": trat[v].skew()} for v in vars_out]))
+    # Cola superior antes / después (percentiles 90–100, train) de las variables con colas más largas
+    curvas = []
+    qgrid = np.linspace(0.90, 1.0, 201)
+    tr_trat = trat[trat["SK_ID_CURR"].map(part) == "train"]
+    for v in CURVAS:
+        antes = tr_imp[v].dropna().quantile(qgrid).values
+        despues = tr_trat[v].dropna().quantile(qgrid).values
+        curvas += [{"variable": v, "percentil": q * 100, "antes": a, "despues": d, "lim_sup": lims[v]["sup"]}
+                   for q, a, d in zip(qgrid, antes, despues)]
+    guardar("curvas_cola", pd.DataFrame(curvas))
 
     json.dump(res, open(OUT / "resumen.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2, default=float)
     print(f"Listo: {len(list(OUT.glob('*.parquet')))} tablas en {OUT.relative_to(REPO)}")

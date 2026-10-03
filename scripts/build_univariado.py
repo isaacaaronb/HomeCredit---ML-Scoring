@@ -196,15 +196,25 @@ def analizar_numerica(tarea):
     res["qq"] = [{"pasada": pasada, "variable": col, "p": float(p), "teorico": float(t), "observado": float(o)}
                  for p, t, o in zip(probs, teo, obs) if np.isfinite(t)]
 
-    # Boxplot (estadísticos sobre todos los datos; puntos atípicos visibles en la vista)
+    # Boxplot. Convención acordada con la profesora: los bigotes llegan a los percentiles del capeo (0.1 y 99.9).
+    # Ex-post son los límites de capeo aprendidos en train, así que tras el tratamiento no queda ningún punto fuera;
+    # ex-ante son los percentiles 0.1 y 99.9 de la base original y los puntos son justo lo que se capeó o eliminó.
+    # La regla de Tukey (1.5·IQR) se sigue reportando como dato.
     q1, med, q3 = np.percentile(x, [25, 50, 75])
     iqr = q3 - q1
-    wl = float(x[x >= q1 - 1.5 * iqr].min())
-    wh = float(x[x <= q3 + 1.5 * iqr].max())
+    t_lo = float(x[x >= q1 - 1.5 * iqr].min())
+    t_hi = float(x[x <= q3 + 1.5 * iqr].max())
+    if m.get("lim_inf") is not None and np.isfinite(m["lim_inf"]):
+        wl, wh = float(m["lim_inf"]), float(m["lim_sup"])
+    else:
+        entera = bool(np.all(x % 1 == 0))
+        wl = float(np.quantile(x, 0.001, method="lower" if entera else "linear"))
+        wh = float(np.quantile(x, 0.999, method="higher" if entera else "linear"))
     res["box"] = {"pasada": pasada, "variable": col, "q1": q1, "mediana": med, "q3": q3, "bigote_inf": wl, "bigote_sup": wh,
-                  "media": float(x.mean()), "vista_min": float(lo), "vista_max": float(hi),
+                  "tukey_inf": t_lo, "tukey_sup": t_hi, "n_fuera_tukey": int(((x < t_lo) | (x > t_hi)).sum()),
+                  "media": float(x.mean()), "vista_min": float(min(lo, wl)), "vista_max": float(max(hi, wh)),
                   "n_fuera": int(((x < wl) | (x > wh)).sum()), "n_fuera_vista": int(((x < lo) | (x > hi)).sum())}
-    fuera = vis[(vis < wl) | (vis > wh)]
+    fuera = x[(x < wl) | (x > wh)]
     if len(fuera):
         rg = np.random.default_rng(SEMILLA)
         fuera = rg.choice(fuera, size=min(len(fuera), 500), replace=False)
@@ -276,11 +286,16 @@ def metricas_dicotomica(serie: pd.Series) -> dict:
     }
 
 
+LIMITES: dict = {}
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     bases = {"ex-ante": pd.read_parquet(ART / "tablon_general.parquet"), "ex-post": pd.read_parquet(ART / "tablon_tratado.parquet")}
     dicc = pd.read_csv(REPO / "data_dictionary" / "diccionario_tablon.csv").set_index("variable")
     ante, post = bases["ex-ante"], bases["ex-post"]
+    global LIMITES
+    LIMITES = json.load(open(ART / "parametros_outliers.json", encoding="utf-8")).get("limites", {})
     N = len(post)
 
     # ── Tipos: regla del notebook sobre la base ex-ante (estable frente al tratamiento) ──
@@ -296,7 +311,7 @@ def main() -> None:
         elif c not in ante:
             nota = "Creada en el preprocesamiento."
         elif clasificar(post[c]) != clasificar(ante[c]) and c not in FORZAR_TIPO:
-            nota = f"Con la regla (≤ {UMBRAL_CAT_NUM} valores) sería «{clasificar(post[c])}» tras el tope; se mantiene «{tipo}»."
+            nota = f"Con la regla (≤ {UMBRAL_CAT_NUM} valores) sería «{clasificar(post[c])}» tras el capeo; se mantiene «{tipo}»."
         familia = dicc.loc[c, "familia"] if c in dicc.index else "14 · Indicadores del preprocesamiento"
         filas_tipo.append({"variable": c, "tipo": tipo, "familia": familia,
                            "tipo_dato": dicc.loc[c, "tipo_dato"] if c in dicc.index else "Dicotómica",
@@ -320,7 +335,9 @@ def main() -> None:
             if not np.isnan(m["centinela"]):
                 x = x[x != m["centinela"]]
             x_fit = rng.choice(x, size=min(len(x), N_MUESTRA_AJUSTE), replace=False)
-            tareas.append((pasada, c, x if len(x) else np.array([0.0]), x_fit, m))
+            lim = LIMITES.get(c) if pasada == "ex-post" else None
+            m_t = dict(m, lim_inf=lim["inf"] if lim else None, lim_sup=lim["sup"] if lim else None)
+            tareas.append((pasada, c, x if len(x) else np.array([0.0]), x_fit, m_t))
     met = pd.DataFrame(met)
 
     print(f"Ajustando {len(tareas)} distribuciones…", flush=True)

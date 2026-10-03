@@ -1,33 +1,443 @@
 {
-  "metodo": "Reasignación por tasa de default: los valores > umbral se llevan al tramo cuya tasa de default es estadísticamente similar (IC 95 % de Wilson) y que, al recibirlos, no mueve su tasa más de 0.5 p.p.; entre los compatibles, el más cercano al umbral. Aprendido solo con train.",
+  "metodo": "A) OWN_CAR_AGE 64–65 → nulo (código de relleno). B) Se eliminan las filas con valores > 3 × p99.9 (o < 3 × p0.1 si es negativo) cuando son ≤ 20 créditos en la base. C) Capeo de las dos colas de cada numérica en los percentiles 0.1 y 99.9 de train.",
   "aprendido_en": "train",
   "semilla_particion": 42,
-  "test_size": 0.3,
-  "umbrales": {
-    "AMT_INCOME_TOTAL": 900000.0,
-    "CNT_CHILDREN": 4.0,
-    "CNT_FAM_MEMBERS": 6.0,
-    "OBS_30_CNT_SOCIAL_CIRCLE": 17.0,
-    "OBS_60_CNT_SOCIAL_CIRCLE": 16.0,
-    "AMT_REQ_CREDIT_BUREAU_QRT": 4.0,
-    "OWN_CAR_AGE": 63.0
-  },
-  "valores_asignados": {
-    "AMT_INCOME_TOTAL": 405000.0,
-    "CNT_CHILDREN": 4.0,
-    "CNT_FAM_MEMBERS": 6.0,
-    "OBS_30_CNT_SOCIAL_CIRCLE": 12.0,
-    "OBS_60_CNT_SOCIAL_CIRCLE": 12.0,
-    "AMT_REQ_CREDIT_BUREAU_QRT": 4.0,
-    "OWN_CAR_AGE": 16.0
-  },
-  "topes_anteriores": {
-    "AMT_INCOME_TOTAL": 900000.0,
-    "CNT_CHILDREN": 4.0,
-    "CNT_FAM_MEMBERS": 6.0,
-    "OBS_30_CNT_SOCIAL_CIRCLE": 17.0,
-    "OBS_60_CNT_SOCIAL_CIRCLE": 16.0,
-    "AMT_REQ_CREDIT_BUREAU_QRT": 4.0,
-    "OWN_CAR_AGE": 30.0
+  "test_size": 0.2,
+  "car_relleno": [
+    64,
+    65
+  ],
+  "factor_extremo": 3.0,
+  "max_filas_eliminar": 20,
+  "percentiles_capeo": [
+    0.1,
+    99.9
+  ],
+  "filas_eliminadas": [
+    114967,
+    120860,
+    123587,
+    133023,
+    138790,
+    157471,
+    161114,
+    169704,
+    190160,
+    192716,
+    196091,
+    199821,
+    201411,
+    206063,
+    217276,
+    219563,
+    225210,
+    237101,
+    244921,
+    246671,
+    252084,
+    256130,
+    265681,
+    272071,
+    278383,
+    280108,
+    303956,
+    307239,
+    310601,
+    313127,
+    317748,
+    326535,
+    332434,
+    336147,
+    337151,
+    345161,
+    358308,
+    363076,
+    377322,
+    381930,
+    385674,
+    387126,
+    393033,
+    393383,
+    401563,
+    407877,
+    410527,
+    429258,
+    432980,
+    439403,
+    446029
+  ],
+  "limites": {
+    "CNT_CHILDREN": {
+      "inf": 0.0,
+      "sup": 4.0
+    },
+    "AMT_INCOME_TOTAL": {
+      "inf": 31500.0,
+      "sup": 900000.0
+    },
+    "AMT_CREDIT": {
+      "inf": 47970.0,
+      "sup": 2517300.0
+    },
+    "AMT_ANNUITY": {
+      "inf": 3923.712,
+      "sup": 110492.10000000401
+    },
+    "AMT_GOODS_PRICE": {
+      "inf": 45000.0,
+      "sup": 2250000.0
+    },
+    "REGION_POPULATION_RELATIVE": {
+      "inf": 0.001276,
+      "sup": 0.072508
+    },
+    "DAYS_BIRTH": {
+      "inf": -25004.0,
+      "sup": -7759.0
+    },
+    "DAYS_EMPLOYED": {
+      "inf": -14330.0,
+      "sup": 0.0
+    },
+    "DAYS_REGISTRATION": {
+      "inf": -16544.0,
+      "sup": -3.0
+    },
+    "DAYS_ID_PUBLISH": {
+      "inf": -6040.0,
+      "sup": -6.0
+    },
+    "OWN_CAR_AGE": {
+      "inf": 0.0,
+      "sup": 42.0
+    },
+    "CNT_FAM_MEMBERS": {
+      "inf": 1.0,
+      "sup": 6.0
+    },
+    "HOUR_APPR_PROCESS_START": {
+      "inf": 2.0,
+      "sup": 21.0
+    },
+    "EXT_SOURCE_1": {
+      "inf": 0.046884068061305274,
+      "sup": 0.915825333077255
+    },
+    "EXT_SOURCE_2": {
+      "inf": 0.00167791782591956,
+      "sup": 0.8037093495558975
+    },
+    "EXT_SOURCE_3": {
+      "inf": 0.0005272652387098,
+      "sup": 0.8633633824101478
+    },
+    "APARTMENTS_AVG": {
+      "inf": 0.0,
+      "sup": 0.9876
+    },
+    "BASEMENTAREA_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "YEARS_BEGINEXPLUATATION_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "YEARS_BUILD_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "COMMONAREA_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "ELEVATORS_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "ENTRANCES_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "FLOORSMAX_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "FLOORSMIN_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "LANDAREA_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "LIVINGAPARTMENTS_AVG": {
+      "inf": 0.0,
+      "sup": 0.9901
+    },
+    "LIVINGAREA_AVG": {
+      "inf": 0.0,
+      "sup": 0.9933545000001148
+    },
+    "NONLIVINGAPARTMENTS_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "NONLIVINGAREA_AVG": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "APARTMENTS_MODE": {
+      "inf": 0.0,
+      "sup": 0.9997206000000151
+    },
+    "BASEMENTAREA_MODE": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "YEARS_BEGINEXPLUATATION_MODE": {
+      "inf": 0.0005,
+      "sup": 1.0
+    },
+    "YEARS_BUILD_MODE": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "COMMONAREA_MODE": {
+      "inf": 0.0,
+      "sup": 0.9861248000004328
+    },
+    "ELEVATORS_MODE": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "ENTRANCES_MODE": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "FLOORSMAX_MODE": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "FLOORSMIN_MODE": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "LANDAREA_MODE": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "LIVINGAPARTMENTS_MODE": {
+      "inf": 0.0,
+      "sup": 0.9763356000000203
+    },
+    "LIVINGAREA_MODE": {
+      "inf": 0.0,
+      "sup": 0.995
+    },
+    "NONLIVINGAPARTMENTS_MODE": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "NONLIVINGAREA_MODE": {
+      "inf": 0.0,
+      "sup": 0.9946128000001947
+    },
+    "APARTMENTS_MEDI": {
+      "inf": 0.0,
+      "sup": 0.991
+    },
+    "BASEMENTAREA_MEDI": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "YEARS_BEGINEXPLUATATION_MEDI": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "YEARS_BUILD_MEDI": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "COMMONAREA_MEDI": {
+      "inf": 0.0,
+      "sup": 0.9955422000000952
+    },
+    "ELEVATORS_MEDI": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "ENTRANCES_MEDI": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "FLOORSMAX_MEDI": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "FLOORSMIN_MEDI": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "LANDAREA_MEDI": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "LIVINGAPARTMENTS_MEDI": {
+      "inf": 0.0,
+      "sup": 0.9654
+    },
+    "LIVINGAREA_MEDI": {
+      "inf": 0.0,
+      "sup": 0.9931
+    },
+    "NONLIVINGAPARTMENTS_MEDI": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "NONLIVINGAREA_MEDI": {
+      "inf": 0.0,
+      "sup": 0.9988716000000408
+    },
+    "TOTALAREA_MODE": {
+      "inf": 0.0,
+      "sup": 0.956
+    },
+    "OBS_30_CNT_SOCIAL_CIRCLE": {
+      "inf": 0.0,
+      "sup": 17.0
+    },
+    "DEF_30_CNT_SOCIAL_CIRCLE": {
+      "inf": 0.0,
+      "sup": 4.0
+    },
+    "OBS_60_CNT_SOCIAL_CIRCLE": {
+      "inf": 0.0,
+      "sup": 16.0
+    },
+    "DEF_60_CNT_SOCIAL_CIRCLE": {
+      "inf": 0.0,
+      "sup": 3.0
+    },
+    "DAYS_LAST_PHONE_CHANGE": {
+      "inf": -3589.0,
+      "sup": 0.0
+    },
+    "AMT_REQ_CREDIT_BUREAU_HOUR": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "AMT_REQ_CREDIT_BUREAU_DAY": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "AMT_REQ_CREDIT_BUREAU_WEEK": {
+      "inf": 0.0,
+      "sup": 2.0
+    },
+    "AMT_REQ_CREDIT_BUREAU_MON": {
+      "inf": 0.0,
+      "sup": 12.0
+    },
+    "AMT_REQ_CREDIT_BUREAU_QRT": {
+      "inf": 0.0,
+      "sup": 4.0
+    },
+    "AMT_REQ_CREDIT_BUREAU_YEAR": {
+      "inf": 0.0,
+      "sup": 9.0
+    },
+    "BUREAU_N_CREDITOS": {
+      "inf": 1.0,
+      "sup": 30.0
+    },
+    "BUREAU_N_ACTIVOS": {
+      "inf": 0.0,
+      "sup": 11.0
+    },
+    "BUREAU_DEUDA_TOTAL": {
+      "inf": -1455.1065000000012,
+      "sup": 15943405.590000113
+    },
+    "BUREAU_MAX_DIAS_ATRASO": {
+      "inf": 0.0,
+      "sup": 1845.0
+    },
+    "BUREAU_MESES_OBSERVADOS": {
+      "inf": 1.0,
+      "sup": 1083.0
+    },
+    "BUREAU_MESES_CON_ATRASO": {
+      "inf": 0.0,
+      "sup": 98.0
+    },
+    "BUREAU_MESES_ESTADO_CONOCIDO": {
+      "inf": 0.0,
+      "sup": 403.0
+    },
+    "BUREAU_PROP_MESES_CON_ATRASO": {
+      "inf": 0.0,
+      "sup": 0.9371618421052661
+    },
+    "HC_N_SOLICITUDES": {
+      "inf": 1.0,
+      "sup": 32.0
+    },
+    "HC_N_APROBADAS": {
+      "inf": 0.0,
+      "sup": 15.0
+    },
+    "HC_N_RECHAZADAS": {
+      "inf": 0.0,
+      "sup": 16.0
+    },
+    "HC_DIAS_ULTIMA_DECISION": {
+      "inf": -2879.0,
+      "sup": -2.0
+    },
+    "HC_PROP_SOLICITUDES_RECHAZADAS": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "HC_N_OPERACIONES_POS": {
+      "inf": 1.0,
+      "sup": 14.0
+    },
+    "HC_POS_MAX_ATRASO": {
+      "inf": 0.0,
+      "sup": 2543.0
+    },
+    "HC_POS_MAX_CUOTAS_PENDIENTES": {
+      "inf": 0.0,
+      "sup": 58.0
+    },
+    "HC_CARD_MAX_ATRASO": {
+      "inf": 0.0,
+      "sup": 1797.0
+    },
+    "HC_CARD_MAX_UTILIZACION": {
+      "inf": 0.0,
+      "sup": 1.3873458100000258
+    },
+    "HC_CARD_MAX_ULTIMO_SALDO": {
+      "inf": 0.0,
+      "sup": 923440.285800001
+    },
+    "HC_N_REGISTROS_PAGO": {
+      "inf": 1.0,
+      "sup": 249.0
+    },
+    "HC_N_PAGOS_TARDE": {
+      "inf": 0.0,
+      "sup": 56.0
+    },
+    "HC_PAY_MAX_ATRASO": {
+      "inf": 0.0,
+      "sup": 1760.0
+    },
+    "HC_PROP_PAGOS_TARDE": {
+      "inf": 0.0,
+      "sup": 0.7647058823529411
+    }
   }
 }

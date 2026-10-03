@@ -25,5 +25,17 @@
     "EXT_SOURCE_3": 246546
   },
   "celdas_nulas_antes": 11283509,
-  "celdas_nulas_despues": 11042837
+  "celdas_nulas_despues": 11044435,
+  "filas_post": 307460,
+  "filas_eliminadas": 51,
+  "ingreso_original": {
+    "std": 237123.1462788562,
+    "asim": 391.55965410418776,
+    "max": 117000000.0
+  },
+  "ingreso_tratado": {
+    "std": 91727.38315002291,
+    "asim": 2.3410619423821926,
+    "max": 900000.0
+  }
 }
