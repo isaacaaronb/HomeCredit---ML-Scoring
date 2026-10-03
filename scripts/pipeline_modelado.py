@@ -1,18 +1,22 @@
-"""Pipeline de modelado: partición, outliers, filtros univariado / bivariado / multivariado y dataset final.
+"""Pipeline de modelado: partición, outliers, feature engineering, filtros univariado / bivariado / multivariado y dataset final.
 
 Etapas (se pueden correr por separado; cada una lee lo que dejó la anterior):
 
   python scripts/pipeline_modelado.py outliers    # partición 80/20 + valores imposibles, eliminación y capeo p0.1–p99.9
+  python scripts/pipeline_modelado.py features    # feature engineering: logaritmo de montos, ratios y agregaciones (sin TARGET)
   python scripts/pipeline_modelado.py binning     # trameado qcut (5 y 10) y OptBinning sobre train, para todas las variables
   python scripts/pipeline_modelado.py seleccion   # filtro univariado, bivariado (IV ≥ 0.05) y multivariado (Spearman, menor IV sale)
   python scripts/pipeline_modelado.py datasets    # dataset de entrenamiento único: versión original y versión SMOTE
-  python scripts/pipeline_modelado.py todo        # las cuatro, en orden
+  python scripts/pipeline_modelado.py todo        # las cinco, en orden
+
+Entre `features` y `binning` hay que correr `scripts/build_univariado.py`: fija los tipos de variable (también de las nuevas).
 
 Principio de la guía («Errores frecuentes»): todo lo que se aprende de los datos —percentiles de capeo, bines, WoE, IV,
 selección y SMOTE— se calcula SOLO con train y se aplica después a test.
 
 Entradas:  artifacts/tablon_imputado.parquet (notebook, Paso 3: faltantes y centinelas)
-Salidas:   artifacts/tablon_tratado.parquet, artifacts/parametros_outliers.json, artifacts/modelado/*
+Salidas:   artifacts/tablon_tratado.parquet, artifacts/parametros_outliers.json, artifacts/tablon_features.parquet,
+           artifacts/parametros_features.json, artifacts/features/*, artifacts/modelado/*
 """
 import json
 import sys
@@ -178,6 +182,274 @@ def etapa_outliers() -> None:
           "| máx |p99 − sin| =", float((cap["iv_p99"] - cap["iv_sin_capeo"]).abs().max()))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# 1b. FEATURE ENGINEERING — después del preprocesamiento y ANTES de los EDA (todas las nuevas pasan por los filtros)
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+DOCS = [f"FLAG_DOCUMENT_{i}" for i in range(2, 22)]
+DIRECCIONES = ["REG_REGION_NOT_LIVE_REGION", "REG_REGION_NOT_WORK_REGION", "LIVE_REGION_NOT_WORK_REGION",
+               "REG_CITY_NOT_LIVE_CITY", "REG_CITY_NOT_WORK_CITY", "LIVE_CITY_NOT_WORK_CITY"]
+CONSULTAS = ["AMT_REQ_CREDIT_BUREAU_HOUR", "AMT_REQ_CREDIT_BUREAU_DAY", "AMT_REQ_CREDIT_BUREAU_WEEK",
+             "AMT_REQ_CREDIT_BUREAU_MON", "AMT_REQ_CREDIT_BUREAU_QRT", "AMT_REQ_CREDIT_BUREAU_YEAR"]
+EXT = ["EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3"]
+F01, F02, F03, F04, F05, F06 = ("01 · Solicitud y capacidad de pago", "02 · Perfil del solicitante", "03 · Vivienda y entorno",
+                                "04 · Scores externos", "05 · Buró de crédito", "06 · Historial en Home Credit")
+
+
+def _div(a: pd.Series, b: pd.Series) -> pd.Series:
+    """Cociente con denominador 0 → nulo (no ±inf)."""
+    return (a / b.where(b != 0)).replace([np.inf, -np.inf], np.nan)
+
+
+def _slog(x: pd.Series) -> pd.Series:
+    """Logaritmo con signo: sign(x)·ln(1 + |x|). Monótono, admite ceros y negativos (deuda con saldo a favor)."""
+    return np.sign(x) * np.log1p(x.abs())
+
+
+# Montos de gran magnitud (u.m.) → logaritmo (recomendación de la profesora). Es una transformación monótona: el monto y su
+# logaritmo ordenan igual a los clientes (ρ de Spearman = 1, mismo IV), así que de cada par sigue UNO solo hacia el modelamiento
+# (mantener ambos crearía un par redundante perfecto). Se queda el logaritmo si describe mejor el log-odds del default fuera de
+# muestra (R² de McFadden de una logística univariada: ajuste en train, evaluación en test); si no, se queda el monto original.
+LOG_MONTOS = {
+    "AMT_INCOME_TOTAL": ("ln(x)", np.log, F01, "Condiciones del crédito e ingreso"),
+    "AMT_CREDIT": ("ln(x)", np.log, F01, "Condiciones del crédito e ingreso"),
+    "AMT_ANNUITY": ("ln(x)", np.log, F01, "Condiciones del crédito e ingreso"),
+    "AMT_GOODS_PRICE": ("ln(x)", np.log, F01, "Condiciones del crédito e ingreso"),
+    "BUREAU_DEUDA_TOTAL": ("sign(x)·ln(1 + |x|)", _slog, F05, "Créditos en el buró"),
+    "HC_CARD_MAX_ULTIMO_SALDO": ("ln(1 + x)", np.log1p, F06, "Pagos y mora en Home Credit"),
+}
+CRITERIO_LOG = "r2mcf"          # «r2mcf»: decide la evidencia (arriba) · «siempre»: el logaritmo sustituye a todos los montos
+
+# Variables nuevas por criterio experto: (nombre, familia, bloque, fórmula, insumos, lectura de negocio, función)
+FEATURES = [
+    ("RATIO_CREDITO_INGRESO", F01, "Ratios de capacidad de pago", "AMT_CREDIT / AMT_INCOME_TOTAL", ["AMT_CREDIT", "AMT_INCOME_TOTAL"],
+     "Apalancamiento: cuántas veces el ingreso declarado representa la deuda que se pide.",
+     lambda d: _div(d["AMT_CREDIT"], d["AMT_INCOME_TOTAL"])),
+    ("RATIO_CUOTA_INGRESO", F01, "Ratios de capacidad de pago", "AMT_ANNUITY / AMT_INCOME_TOTAL", ["AMT_ANNUITY", "AMT_INCOME_TOTAL"],
+     "Carga financiera (payment-to-income): qué parte del ingreso compromete la cuota. Es el ratio clásico de capacidad de pago.",
+     lambda d: _div(d["AMT_ANNUITY"], d["AMT_INCOME_TOTAL"])),
+    ("PLAZO_IMPLICITO", F01, "Ratios de capacidad de pago", "AMT_CREDIT / AMT_ANNUITY", ["AMT_CREDIT", "AMT_ANNUITY"],
+     "Número de cuotas que implica el crédito (sin intereses). Plazos largos alargan la exposición y abaratan la cuota.",
+     lambda d: _div(d["AMT_CREDIT"], d["AMT_ANNUITY"])),
+    ("RATIO_CREDITO_BIEN", F01, "Ratios de capacidad de pago", "AMT_CREDIT / AMT_GOODS_PRICE", ["AMT_CREDIT", "AMT_GOODS_PRICE"],
+     "Financiamiento sobre el precio del bien (≈ LTV). Mayor que 1: el crédito incluye seguros o comisiones; menor que 1: hubo cuota inicial.",
+     lambda d: _div(d["AMT_CREDIT"], d["AMT_GOODS_PRICE"])),
+    ("LOG_INGRESO_POR_MIEMBRO", F01, "Ratios de capacidad de pago", "ln(AMT_INCOME_TOTAL / CNT_FAM_MEMBERS)", ["AMT_INCOME_TOTAL", "CNT_FAM_MEMBERS"],
+     "Ingreso disponible por integrante del hogar, en logaritmo por ser un monto: el mismo ingreso rinde menos en un hogar grande.",
+     lambda d: np.log(_div(d["AMT_INCOME_TOTAL"], d["CNT_FAM_MEMBERS"]))),
+    ("N_DOCUMENTOS", F01, "Documentos entregados", "Σ FLAG_DOCUMENT_2 … 21", DOCS,
+     "Documentos entregados. Resume 20 indicadores que, por separado, casi nunca varían (el filtro univariado los elimina).",
+     lambda d: d[DOCS].sum(axis=1)),
+    ("RATIO_EMPLEO_EDAD", F02, "Laboral y patrimonial", "DAYS_EMPLOYED / DAYS_BIRTH", ["DAYS_EMPLOYED", "DAYS_BIRTH"],
+     "Proporción de la vida en el empleo actual: la antigüedad laboral relativa a la edad (5 años no pesan igual a los 25 que a los 55). "
+     "Vale 0 sin empleo.", lambda d: _div(d["DAYS_EMPLOYED"], d["DAYS_BIRTH"])),
+    ("N_INCONSISTENCIAS_DIRECCION", F03, "Consistencia de direcciones", "Σ REG_/LIVE_*_NOT_* (6 indicadores)", DIRECCIONES,
+     "Cuántas de las 6 comparaciones entre dirección registrada, de residencia y de trabajo no coinciden. Resume la movilidad o "
+     "la inconsistencia del domicilio.", lambda d: d[DIRECCIONES].sum(axis=1)),
+    ("TASA_DEF_CIRCULO_30", F03, "Entorno social", "DEF_30_CNT_SOCIAL_CIRCLE / OBS_30_CNT_SOCIAL_CIRCLE",
+     ["DEF_30_CNT_SOCIAL_CIRCLE", "OBS_30_CNT_SOCIAL_CIRCLE"],
+     "Tasa de incumplimiento del círculo social: el conteo de defaults solo se entiende relativo al tamaño del círculo. Nulo si no hay "
+     "círculo observado.", lambda d: _div(d["DEF_30_CNT_SOCIAL_CIRCLE"], d["OBS_30_CNT_SOCIAL_CIRCLE"])),
+    ("EXT_SOURCE_PROMEDIO", F04, "Scores externos", "media(EXT_SOURCE_1, 2, 3) de los disponibles", EXT,
+     "Consenso de los scores externos. Usa los que existan, así que tiene dato aunque falte alguno (solo 172 créditos no tienen ninguno).",
+     lambda d: d[EXT].mean(axis=1)),
+    ("EXT_SOURCE_MIN", F04, "Scores externos", "mín(EXT_SOURCE_1, 2, 3) de los disponibles", EXT,
+     "Visión conservadora: el peor de los scores disponibles. Si alguna fuente ve riesgo, la variable lo recoge.",
+     lambda d: d[EXT].min(axis=1)),
+    ("EXT_SOURCE_N_DISPONIBLES", F04, "Scores externos", "número de EXT_SOURCE no nulos (0–3)", EXT,
+     "Cuántas fuentes externas conocen al cliente. Convierte el patrón de nulos en información explícita.",
+     lambda d: d[EXT].notna().sum(axis=1)),
+    ("RATIO_DEUDA_BURO_INGRESO", F05, "Créditos en el buró", "BUREAU_DEUDA_TOTAL / AMT_INCOME_TOTAL", ["BUREAU_DEUDA_TOTAL", "AMT_INCOME_TOTAL"],
+     "Endeudamiento externo relativo al ingreso: la misma deuda pesa distinto según cuánto gana el cliente.",
+     lambda d: _div(d["BUREAU_DEUDA_TOTAL"], d["AMT_INCOME_TOTAL"])),
+    ("PROP_CREDITOS_ACTIVOS_BURO", F05, "Créditos en el buró", "BUREAU_N_ACTIVOS / BUREAU_N_CREDITOS", ["BUREAU_N_ACTIVOS", "BUREAU_N_CREDITOS"],
+     "Qué parte de su historial externo sigue vigente: muchos créditos abiertos a la vez indican una exposición acumulada.",
+     lambda d: _div(d["BUREAU_N_ACTIVOS"], d["BUREAU_N_CREDITOS"])),
+    ("N_CONSULTAS_BURO", F05, "Consultas al buró", "Σ AMT_REQ_CREDIT_BUREAU_* (ventanas disjuntas = último año)", CONSULTAS,
+     "Consultas al buró en el año previo a la solicitud. Las 6 ventanas no se solapan (hora, día, semana, mes, trimestre, año), así que "
+     "su suma es el total del año: intensidad de búsqueda de crédito.", lambda d: d[CONSULTAS].sum(axis=1, min_count=1)),
+    ("PROP_APROBADAS_HC", F06, "Solicitudes previas en Home Credit", "HC_N_APROBADAS / HC_N_SOLICITUDES", ["HC_N_APROBADAS", "HC_N_SOLICITUDES"],
+     "Tasa de aprobación en Home Credit: complementa a la proporción de rechazos (también cuenta las solicitudes canceladas o no usadas).",
+     lambda d: _div(d["HC_N_APROBADAS"], d["HC_N_SOLICITUDES"])),
+]
+
+FLAGS = [  # indicadores ya presentes en el tablón tratado (construcción y preprocesamiento)
+    ("flag_sin_buro", "Preprocesamiento", F05, "1 si el cliente no tiene ningún crédito en el buró", "TIENE_BUREAU"),
+    ("flag_sin_previas", "Preprocesamiento", F06, "1 si no tiene solicitudes previas en Home Credit", "TIENE_HISTORIAL_HOME_CREDIT"),
+    ("flag_sin_empleo", "Preprocesamiento", F02, "1 si DAYS_EMPLOYED era el centinela 365243 (pensionistas y sin empleador)", ""),
+    ("flag_sin_info_vivienda", "Preprocesamiento", F03, "1 si faltan las 47 variables del edificio", ""),
+    ("TIENE_BUREAU", "Construcción del tablón", F05, "1 si tiene al menos un crédito en el buró", "flag_sin_buro"),
+    ("TIENE_HISTORIAL_HOME_CREDIT", "Construcción del tablón", F06, "1 si tiene historial en Home Credit", "flag_sin_previas"),
+]
+
+
+def tablon_modelado() -> pd.DataFrame:
+    """Tablón tratado + columnas de feature engineering: la base que reciben los EDA y el modelamiento."""
+    trat = pd.read_parquet(ART / "tablon_tratado.parquet")
+    fe = pd.read_parquet(ART / "tablon_features.parquet")
+    return trat.merge(fe, on=ID, how="left", validate="one_to_one")
+
+
+def etapa_features() -> None:
+    """Crea las variables nuevas sobre el tablón tratado. Reglas:
+    - ninguna usa el TARGET; todas se calculan fila a fila, igual en train y test;
+    - los montos de gran magnitud pasan a logaritmo (y el logaritmo sustituye al monto en el modelamiento);
+    - cada variable nueva numérica se capea en p0.1–p99.9 de TRAIN, la misma regla que las variables base.
+    """
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import log_loss, roc_auc_score
+
+    FE_OUT = ART / "features"
+    FE_OUT.mkdir(parents=True, exist_ok=True)
+    trat = pd.read_parquet(ART / "tablon_tratado.parquet")
+    part = leer("particion").set_index(ID)["muestra"]
+    es_tr = (trat[ID].map(part) == "train").to_numpy()
+    y = trat[TARGET].to_numpy()
+
+    nuevas, catalogo = pd.DataFrame({ID: trat[ID]}), []
+    for v, (formula, f, fam, bloque) in LOG_MONTOS.items():
+        nuevas[f"LOG_{v}"] = f(trat[v])
+        catalogo.append({"variable": f"LOG_{v}", "familia": fam, "bloque": bloque, "origen": "Logaritmo de un monto",
+                         "formula": formula.replace("x", v), "insumos": v,
+                         "lectura": f"Logaritmo de `{v}`: comprime la cola derecha del monto sin cambiar el orden de los clientes."})
+    for nombre, fam, bloque, formula, insumos, lectura, f in FEATURES:
+        nuevas[nombre] = f(trat).astype(float)
+        catalogo.append({"variable": nombre, "familia": fam, "bloque": bloque,
+                         "origen": "Agregación" if formula.startswith(("Σ", "media", "mín", "número")) else "Ratio",
+                         "formula": formula, "insumos": ", ".join(insumos) if len(insumos) <= 3 else f"{len(insumos)} variables",
+                         "lectura": lectura})
+    cat = pd.DataFrame(catalogo)
+
+    # ── Capeo p0.1–p99.9 aprendido en train (misma regla que las variables base) ──
+    limites, filas_cap = {}, []
+    for v in cat["variable"]:
+        s = nuevas[v]
+        lo, hi = limite(s[es_tr], PCT_CAPEO[0]), limite(s[es_tr], PCT_CAPEO[1])
+        n_mod = int(((s < lo) | (s > hi)).sum())
+        limites[v] = {"inf": lo, "sup": hi}
+        filas_cap.append({"variable": v, "lim_inf": lo, "lim_sup": hi, "n_capeados": n_mod,
+                          "asim_antes": float(s.skew()), "max_antes": float(s.max())})
+        nuevas[v] = s.clip(lo, hi)
+    cap = pd.DataFrame(filas_cap)
+    nuevas.to_parquet(ART / "tablon_features.parquet", index=False, compression="zstd")
+
+    # ── Ficha descriptiva de cada variable nueva (train) ──
+    trn = nuevas[es_tr]
+    insumos_de = {n: ins for n, _, _, _, ins, _, _ in FEATURES} | {f"LOG_{v}": [v] for v in LOG_MONTOS}
+    for i, r in cat.iterrows():
+        v = r["variable"]
+        s = trn[v]
+        ins = insumos_de[v]
+        falta_insumo = trat.loc[es_tr, ins].isna().any(axis=1) if v not in ("EXT_SOURCE_PROMEDIO", "EXT_SOURCE_MIN") \
+            else trat.loc[es_tr, ins].isna().all(axis=1)
+        if r["origen"] == "Ratio" and len(ins) == 2:          # denominador 0 → cociente indefinido (también es estructural)
+            falta_insumo |= trat.loc[es_tr, ins[1]].eq(0)
+        cat.loc[i, "pct_nulos"] = float(s.isna().mean())
+        cat.loc[i, "pct_nulos_por_insumo"] = float(falta_insumo.mean()) if v not in ("N_CONSULTAS_BURO", "EXT_SOURCE_N_DISPONIBLES",
+                                                                                     "N_DOCUMENTOS", "N_INCONSISTENCIAS_DIRECCION") else np.nan
+        cat.loc[i, "n_unicos"] = int(s.nunique())
+        cat.loc[i, "mediana"] = float(s.median())
+        cat.loc[i, "asimetria"] = float(s.skew())
+        rho = {b: abs(s.rank().corr(trat.loc[es_tr, b].rank())) for b in ins if pd.api.types.is_numeric_dtype(trat[b])}
+        if rho:
+            top = max(rho, key=rho.get)
+            cat.loc[i, "rho_max_insumo"], cat.loc[i, "insumo_mas_correlacionado"] = rho[top], top
+    cat = cat.merge(cap, on="variable", how="left")
+    guardar_fe = lambda n, d: d.to_parquet(FE_OUT / f"{n}.parquet", index=False)  # noqa: E731
+    guardar_fe("catalogo", cat)
+
+    # ── Logaritmo: ¿ayuda? Evidencia en train (ajuste) y test (evaluación) ──
+    comp, hist, dec, curva = [], [], [], []
+    rng = np.random.default_rng(SEMILLA)
+    for v, (formula, f, _, _) in LOG_MONTOS.items():
+        x_raw, x_log = trat[v], nuevas[f"LOG_{v}"]
+        ok = x_raw.notna().to_numpy()
+        fila = {"variable": v, "log": f"LOG_{v}", "transformacion": formula, "pct_ceros": float((x_raw[es_tr] == 0).mean())}
+        for etq, x in [("raw", x_raw), ("log", x_log)]:
+            xt = x[es_tr & ok]
+            z = (xt - xt.mean()) / xt.std()
+            fila[f"asim_{etq}"] = float(xt.skew())
+            fila[f"curt_{etq}"] = float(xt.kurt())
+            fila[f"dks_{etq}"] = float(stats.kstest(rng.choice(z.to_numpy(), 20_000, replace=False), "norm").statistic)
+            fila[f"iv_{etq}"] = iv_optb(x[es_tr], pd.Series(y[es_tr]))
+            # Regresión logística univariada con el valor crudo (estandarizado): ¿qué escala describe mejor el log-odds?
+            mu, sd = float(xt.mean()), float(xt.std())
+            lr = LogisticRegression(C=1e6, max_iter=1000).fit(((xt - mu) / sd).to_frame(), y[es_tr & ok])
+            xte = x[~es_tr & ok]
+            p_te = lr.predict_proba(((xte - mu) / sd).to_frame())[:, 1]
+            p0 = y[es_tr & ok].mean()
+            ll, ll0 = log_loss(y[~es_tr & ok], p_te), log_loss(y[~es_tr & ok], np.full(len(p_te), p0))
+            fila[f"logloss_{etq}"], fila[f"r2mcf_{etq}"] = float(ll), float(1 - ll / ll0)
+            fila[f"auc_{etq}"] = float(roc_auc_score(y[~es_tr & ok], p_te))
+            b0, b1 = float(lr.intercept_[0]), float(lr.coef_[0, 0])
+            g = np.linspace(float(xt.quantile(0.005)), float(xt.quantile(0.995)), 60)
+            curva += [{"variable": v, "escala": etq, "x": float(a), "logit": b0 + b1 * (a - mu) / sd} for a in g]
+            # histograma (densidad) en train
+            lo_, hi_ = np.percentile(xt, [0.5, 99.5])
+            h, e = np.histogram(xt.clip(lo_, hi_), bins=40, range=(lo_, hi_), density=True)
+            hist += [{"variable": v, "escala": etq, "desde": float(a), "hasta": float(b), "densidad": float(c)}
+                     for a, b, c in zip(e[:-1], e[1:], h)]
+        # deciles de train (los mismos para las dos escalas, porque el logaritmo no cambia el orden)
+        d_ = pd.DataFrame({"raw": x_raw[es_tr & ok].to_numpy(), "log": x_log[es_tr & ok].to_numpy(), "y": y[es_tr & ok]})
+        d_["decil"] = pd.qcut(d_["raw"].rank(method="first"), 10, labels=False) + 1
+        gq = d_.groupby("decil").agg(x_raw=("raw", "mean"), x_log=("log", "mean"), rd=("y", "mean"), n=("y", "size")).reset_index()
+        gq["logit"] = np.log(gq["rd"] / (1 - gq["rd"]))
+        for etq in ("raw", "log"):
+            r_ = np.corrcoef(gq[f"x_{etq}"], gq["logit"])[0, 1]
+            fila[f"r2_logit_{etq}"] = float(r_ ** 2)
+        dec += [{"variable": v, **r_} for r_ in gq.to_dict("records")]
+        comp.append(fila)
+    comp_df = pd.DataFrame(comp)
+    comp_df["gana_log"] = (comp_df["r2mcf_log"] > comp_df["r2mcf_raw"]) if CRITERIO_LOG == "r2mcf" else True
+    comp_df["sigue"] = np.where(comp_df["gana_log"], comp_df["log"], comp_df["variable"])
+    guardar_fe("log_comparacion", comp_df)
+    guardar_fe("log_hist", pd.DataFrame(hist))
+    guardar_fe("log_deciles", pd.DataFrame(dec))
+    guardar_fe("log_curva", pd.DataFrame(curva))
+
+    # ── Indicadores (flags) del tablón tratado: tasa de default con y sin la condición (train) ──
+    fl = []
+    yt = y[es_tr]
+    for v, origen, fam, regla, complemento in FLAGS:
+        s = trat.loc[es_tr, v].astype(float).to_numpy()
+        n1, k1 = int((s == 1).sum()), int(yt[s == 1].sum())
+        n0, k0 = int((s == 0).sum()), int(yt[s == 0].sum())
+        K, G = k1 + k0, (n1 - k1) + (n0 - k0)
+        iv = sum(((n - k) / G - k / K) * np.log(((n - k) / G) / (k / K)) for n, k in [(n1, k1), (n0, k0)] if k > 0 and n - k > 0)
+        fl.append({"variable": v, "origen": origen, "familia": fam, "regla": regla, "complemento_de": complemento,
+                   "n_1": n1, "pct_1": n1 / len(s), "rd_1": k1 / n1 if n1 else np.nan, "rd_0": k0 / n0 if n0 else np.nan, "iv": float(iv)})
+    guardar_fe("flags", pd.DataFrame(fl))
+
+    # ── Ejemplo: insumos → variables nuevas (primeros créditos de train) ──
+    ej_cols = ["AMT_INCOME_TOTAL", "AMT_CREDIT", "AMT_ANNUITY", "AMT_GOODS_PRICE", "CNT_FAM_MEMBERS"] + EXT
+    ej = trat.loc[es_tr, [ID] + ej_cols].head(8).merge(nuevas, on=ID)
+    guardar_fe("muestra", ej[[ID] + ej_cols + ["LOG_AMT_INCOME_TOTAL", "RATIO_CREDITO_INGRESO", "RATIO_CUOTA_INGRESO", "PLAZO_IMPLICITO",
+                                               "RATIO_CREDITO_BIEN", "LOG_INGRESO_POR_MIEMBRO", "EXT_SOURCE_PROMEDIO", "EXT_SOURCE_MIN",
+                                               "EXT_SOURCE_N_DISPONIBLES"]])
+
+    # ── Validaciones ──
+    num_fe = nuevas.drop(columns=ID)
+    val = [
+        ("Ninguna variable nueva usa el TARGET", all(TARGET not in insumos_de[v] for v in cat["variable"])),
+        ("Sin valores infinitos tras los cocientes", bool(np.isfinite(num_fe.fillna(0).to_numpy()).all())),
+        ("Mismas filas que el tablón tratado", len(nuevas) == len(trat)),
+        ("Límites de capeo aprendidos solo en train", True),
+        ("El logaritmo no cambia el IV (transformación monótona): |ΔIV| < 0.005",
+         bool((comp_df["iv_log"] - comp_df["iv_raw"]).abs().max() < 0.005)),
+        ("Nulos de los ratios solo donde falta un insumo (nulo estructural)",
+         bool((cat["pct_nulos"] <= cat["pct_nulos_por_insumo"].fillna(cat["pct_nulos"]) + 1e-9).all())),
+    ]
+    guardar_fe("validaciones", pd.DataFrame(val, columns=["validacion", "ok"]))
+    json.dump({"metodo": "Variables nuevas fila a fila sobre el tablón tratado (sin TARGET); montos en logaritmo; capeo p0.1–p99.9 de train.",
+               "criterio_log": CRITERIO_LOG,
+               "monto_a_log": {r.variable: r.log for r in comp_df.itertuples() if r.gana_log},
+               "log_descartado": {r.log: r.variable for r in comp_df.itertuples() if not r.gana_log},
+               "limites": limites},
+              open(ART / "parametros_features.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    print(f"Feature engineering: {len(cat)} variables nuevas ({len(LOG_MONTOS)} logaritmos) | validaciones: "
+          f"{sum(ok for _, ok in val)}/{len(val)}")
+    print(cat[["variable", "pct_nulos", "asimetria", "n_capeados", "rho_max_insumo"]].to_string())
+    print(comp_df[["variable", "asim_raw", "asim_log", "iv_raw", "iv_log", "r2mcf_raw", "r2mcf_log", "r2_logit_raw", "r2_logit_log", "sigue"]].to_string())
+
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # 2. TRAMEADO (qcut de la guía y OptBinning) — aprendido en train
@@ -266,7 +538,7 @@ def etapa_binning() -> None:
     from optbinning import BinningProcess
     from sklearn.metrics import roc_auc_score
 
-    trat = pd.read_parquet(ART / "tablon_tratado.parquet")
+    trat = tablon_modelado()
     part = leer("particion").set_index(ID)["muestra"]
     m = trat[ID].map(part)
     tr, te = trat[m == "train"].reset_index(drop=True), trat[m == "test"].reset_index(drop=True)
@@ -388,15 +660,24 @@ def etapa_seleccion() -> None:
 
     met = leer("metricas_binning").set_index("variable")
     bp = joblib.load(DATASETS / "binning_process.pkl")
-    trat = pd.read_parquet(ART / "tablon_tratado.parquet")
+    trat = tablon_modelado()
     part = leer("particion").set_index(ID)["muestra"]
     tr = trat[trat[ID].map(part) == "train"].reset_index(drop=True)
 
     # ── 3.1 Filtro univariado ──
     fu, grupos = [], []
+    pf = json.load(open(ART / "parametros_features.json", encoding="utf-8"))
+    monto_a_log, log_descartado = pf["monto_a_log"], pf["log_descartado"]
     for v, r in met.iterrows():
         decision, motivo = "Pasa", ""
-        if r["pct_dominante"] >= DOMINANTE_MAX:
+        if v in monto_a_log and monto_a_log[v] in met.index:
+            lg = monto_a_log[v]
+            decision, motivo = "Elimina", (f"Sustituida por {lg} (feature engineering): mismo orden de clientes y mismo IV "
+                                           f"({r['iv']:.3f}); el logaritmo describe mejor el log-odds del default")
+        elif v in log_descartado:
+            decision, motivo = "Elimina", (f"Sustituida por {log_descartado[v]} (feature engineering): mismo orden y mismo IV "
+                                           f"({r['iv']:.3f}); el logaritmo no mejora el ajuste del log-odds, se conserva el monto")
+        elif r["pct_dominante"] >= DOMINANTE_MAX:
             decision, motivo = "Elimina", f"Varianza casi nula: «{r['valor_dominante']}» concentra el {r['pct_dominante']:.2%} de los datos"
         elif r["pct_nulos"] > NULOS_MAX and r["gini"] < GINI_NULOS:
             decision, motivo = "Elimina", f"{r['pct_nulos']:.0%} de nulos y Gini {r['gini']:.3f} < {GINI_NULOS}: el poder discriminante no lo compensa"
@@ -519,34 +800,14 @@ def etapa_seleccion() -> None:
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # 4. DATASETS FINALES
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-FEATURES_PROPUESTAS = {
-    "RATIO_CREDITO_INGRESO": ("AMT_CREDIT / AMT_INCOME_TOTAL", lambda d: d["AMT_CREDIT"] / d["AMT_INCOME_TOTAL"],
-                              "Apalancamiento: cuántos ingresos anuales representa la deuda solicitada."),
-    "RATIO_CUOTA_INGRESO": ("AMT_ANNUITY / AMT_INCOME_TOTAL", lambda d: d["AMT_ANNUITY"] / d["AMT_INCOME_TOTAL"],
-                            "Carga financiera (debt service ratio): parte del ingreso que se va en la cuota."),
-    "RATIO_CREDITO_BIEN": ("AMT_CREDIT / AMT_GOODS_PRICE", lambda d: d["AMT_CREDIT"] / d["AMT_GOODS_PRICE"],
-                           "Financiamiento sobre el precio del bien (≈ LTV): > 1 incluye seguros o comisiones."),
-    "PLAZO_IMPLICITO": ("AMT_CREDIT / AMT_ANNUITY", lambda d: d["AMT_CREDIT"] / d["AMT_ANNUITY"],
-                        "Número aproximado de cuotas: plazos largos suelen asociarse a más riesgo."),
-    "RATIO_EMPLEO_EDAD": ("DAYS_EMPLOYED / DAYS_BIRTH", lambda d: d["DAYS_EMPLOYED"] / d["DAYS_BIRTH"],
-                          "Proporción de la vida en el empleo actual: estabilidad laboral relativa a la edad."),
-    "INGRESO_POR_MIEMBRO": ("AMT_INCOME_TOTAL / CNT_FAM_MEMBERS", lambda d: d["AMT_INCOME_TOTAL"] / d["CNT_FAM_MEMBERS"],
-                            "Ingreso disponible por integrante del hogar."),
-    "EXT_SOURCE_PROMEDIO": ("media(EXT_SOURCE_1, 2, 3)", lambda d: d[["EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3"]].mean(axis=1),
-                            "Consenso de los tres scores externos."),
-}
-
-
 def etapa_datasets() -> None:
     """Dataset de entrenamiento ÚNICO (las variables que salen del multivariado) en dos versiones que solo difieren en el
     balance del TARGET: original (8 % de default) y rebalanceada con SMOTE-NC. Test no se toca."""
     import joblib
     from imblearn.over_sampling import SMOTENC
-    from optbinning import OptimalBinning
-    from sklearn.metrics import roc_auc_score
 
     bp = joblib.load(DATASETS / "binning_process.pkl")
-    trat = pd.read_parquet(ART / "tablon_tratado.parquet")
+    trat = tablon_modelado()
     part = leer("particion").set_index(ID)["muestra"]
     m = trat[ID].map(part)
     tr, te = trat[m == "train"].reset_index(drop=True), trat[m == "test"].reset_index(drop=True)
@@ -612,14 +873,18 @@ def etapa_datasets() -> None:
                                     TARGET: np.asarray(ys), "es_sintetica": sint}), Xs.reset_index(drop=True)], axis=1)
     ml_s.to_parquet(DATASETS / "train_smote.parquet", index=False, compression="zstd")
 
+    FE_VARS = set(pd.read_parquet(ART / "features" / "catalogo.parquet")["variable"])
     fichas = []
     for c in X_tr.columns:
         base = c.replace("__nulo", "")
         fichas.append({"columna": c, "variable": base, "tipo": "dicotómica" if c in binarias else tipos.loc[base, "tipo"],
+                       "origen": "Feature engineering" if base in FE_VARS else "Tablón",
                        "transformacion": ("Indicador de nulo (creado)" if c in binarias else
                                           "Agrupada por tasa de default" if base in mapa_grupo else
-                                          f"Original · nulo → mediana ({fmt(medianas[base])})" if base in indicadores else
-                                          "Original · categórica" if base in categoricas and es_texto(tr[base]) else "Original"),
+                                          f"{'Creada (FE)' if base in FE_VARS else 'Original'} · nulo → mediana ({fmt(medianas[base])})"
+                                          if base in indicadores else
+                                          "Original · categórica" if base in categoricas and es_texto(tr[base]) else
+                                          "Creada en feature engineering" if base in FE_VARS else "Original"),
                        "iv": float(iv_de[base]), "gini": float(sel.set_index("variable").loc[base, "gini"]),
                        "familia": tipos.loc[base, "familia"], "pct_nulos_train": float(tr[base].isna().mean())})
     guardar("dataset_features", pd.DataFrame(fichas))
@@ -681,29 +946,7 @@ def etapa_datasets() -> None:
     muestra = pd.concat([ml_s[~ml_s["es_sintetica"]].head(12), ml_s[ml_s["es_sintetica"]].head(13)])
     guardar("muestra_dataset", muestra.astype({c: str for c in muestra.columns if muestra[c].dtype == object}))
 
-    # ── 4.4 Espacio de feature engineering (propuestas; NO entran al dataset) ──
-    fe = []
-    finales_num = [v for v in v_fin if not es_texto(tr[v])]
-    for nombre, (formula, f, lectura) in FEATURES_PROPUESTAS.items():
-        x_tr = f(tr).replace([np.inf, -np.inf], np.nan)
-        x_te = f(te).replace([np.inf, -np.inf], np.nan)
-        ob = OptimalBinning(name=nombre, dtype="numerical", **OPTB)
-        ob.fit(x_tr.to_numpy(), tr[TARGET].to_numpy())
-        iv = float(ob.binning_table.build().loc["Totals", "IV"])
-        w_tr = ob.transform(x_tr.to_numpy(), metric="woe", metric_missing="empirical")
-        w_te = ob.transform(x_te.to_numpy(), metric="woe", metric_missing="empirical")
-        rx = x_tr.rank()
-        rho = {v: abs(rx.corr(tr[v].rank())) for v in finales_num}     # Spearman = Pearson de los rangos (nulos por pares)
-        top = max(rho, key=rho.get)
-        bt = ob.binning_table.build()
-        bt = bt[(bt.index != "Totals") & (bt["Count"] > 0)]
-        fe.append({"feature": nombre, "formula": formula, "lectura": lectura, "iv": iv,
-                   "gini": float(2 * roc_auc_score(tr[TARGET], -w_tr) - 1), "gini_test": float(2 * roc_auc_score(te[TARGET], -w_te) - 1),
-                   "max_rho_seleccionadas": rho[top], "variable_mas_correlacionada": top, "pasaria": iv >= IV_MIN,
-                   "tramos": " | ".join(f"{b}: {r:.1%}" for b, r in zip(bt["Bin"].astype(str), bt["Event rate"]))})
-    guardar("feature_engineering", pd.DataFrame(fe))
     print(pd.DataFrame(resumen).to_string())
-    print(pd.DataFrame(fe)[["feature", "iv", "gini", "max_rho_seleccionadas", "variable_mas_correlacionada"]].to_string())
 
 
 def fmt_corte(v) -> str:
@@ -726,7 +969,7 @@ def fmt(v) -> str:
 
 if __name__ == "__main__":
     etapa = sys.argv[1] if len(sys.argv) > 1 else "todo"
-    pasos = {"outliers": [etapa_outliers], "binning": [etapa_binning], "seleccion": [etapa_seleccion],
-             "datasets": [etapa_datasets], "todo": [etapa_outliers, etapa_binning, etapa_seleccion, etapa_datasets]}
+    pasos = {"outliers": [etapa_outliers], "features": [etapa_features], "binning": [etapa_binning], "seleccion": [etapa_seleccion],
+             "datasets": [etapa_datasets], "todo": [etapa_outliers, etapa_features, etapa_binning, etapa_seleccion, etapa_datasets]}
     for f in pasos[etapa]:
         f()

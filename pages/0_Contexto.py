@@ -147,6 +147,7 @@ ETAPAS = [
     ("Análisis estadístico inicial (descriptivo)", "Separación de variables numéricas, categóricas y dicotómicas; métricas de forma, colas y valores centinela.", "green", "Completado"),
     ("Análisis de calidad (diagnóstico)", "Nulos estructurales vs. informativos, centinelas (p. ej. `DAYS_EMPLOYED = 365243`), outliers y alertas por variable.", "green", "Completado"),
     ("Preprocesamiento", "Imputación solo de faltantes despreciables (moda, mediana, razón de montos) e indicadores de ausencia; los scores externos conservan su nulo (tramo propio en el WoE); outliers: valores sin sentido a nulo, filas super extremas eliminadas y capeo p0.1–p99.9 (aprendido en train, partición 80/20).", "green", "Completado"),
+    ("Feature engineering", "Indicadores del preprocesamiento, logaritmo de los montos (sigue donde mejora el ajuste del log-odds) y 16 variables nuevas por criterio experto: ratios de capacidad de pago, combinaciones de scores externos, endeudamiento en buró. Sin TARGET, capeo p0.1–p99.9 de train; todas pasan por los filtros del EDA.", "green", "Completado"),
     ("EDA univariado", "Distribuciones, ajuste de distribuciones teóricas, boxplots y Q-Q; filtro por varianza, nulos y cardinalidad.", "green", "Completado"),
     ("EDA bivariado vs. TARGET", "Tasa de default por tramos (`qcut` 5 y OptBinning); criterio único para todos los modelos: IV ≥ 0.05 (el Gini se reporta como información).", "green", "Completado"),
     ("EDA multivariado y dataset final", "Redundancia con Spearman (|ρ| > 0.6, sale la de menor IV); dataset de entrenamiento único en dos versiones: original (logística) y SMOTE (ML).", "green", "Completado"),
@@ -166,15 +167,16 @@ with n1, st.container(border=True):
     st.markdown("**Datos**")
     st.page_link("pages/1_Tablon_oficial.py", label="Tablón oficial", icon=":material/table_chart:")
     st.page_link("pages/2_Calidad_y_preprocesamiento.py", label="Calidad y preprocesamiento", icon=":material/rule:")
+    st.page_link("pages/3_Feature_engineering.py", label="Feature engineering", icon=":material/tune:")
 with n2, st.container(border=True):
     st.markdown("**Análisis exploratorio**")
-    st.page_link("pages/3_EDA_univariado.py", label="EDA univariado", icon=":material/bar_chart:")
-    st.page_link("pages/4_EDA_bivariado.py", label="EDA bivariado", icon=":material/compare_arrows:")
-    st.page_link("pages/5_EDA_multivariado.py", label="EDA multivariado", icon=":material/hub:")
+    st.page_link("pages/4_EDA_univariado.py", label="EDA univariado", icon=":material/bar_chart:")
+    st.page_link("pages/5_EDA_bivariado.py", label="EDA bivariado", icon=":material/compare_arrows:")
+    st.page_link("pages/6_EDA_multivariado.py", label="EDA multivariado", icon=":material/hub:")
 with n3, st.container(border=True):
     st.markdown("**Modelamiento**")
-    st.page_link("pages/6_Dataset_final.py", label="Dataset final", icon=":material/dataset:")
-    st.page_link("pages/7_Modelos.py", label="Modelos", icon=":material/model_training:")
+    st.page_link("pages/7_Dataset_final.py", label="Dataset final", icon=":material/dataset:")
+    st.page_link("pages/8_Modelos.py", label="Modelos", icon=":material/model_training:")
     st.page_link(URL_REPO, label="Código en GitHub", icon=":material/code:")
 
 # ── Pie ────────────────────────────────────────────────────────────────────────

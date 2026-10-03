@@ -1,0 +1,104 @@
+{
+  "metodo": "Variables nuevas fila a fila sobre el tablón tratado (sin TARGET); montos en logaritmo; capeo p0.1–p99.9 de train.",
+  "criterio_log": "r2mcf",
+  "monto_a_log": {
+    "BUREAU_DEUDA_TOTAL": "LOG_BUREAU_DEUDA_TOTAL",
+    "HC_CARD_MAX_ULTIMO_SALDO": "LOG_HC_CARD_MAX_ULTIMO_SALDO"
+  },
+  "log_descartado": {
+    "LOG_AMT_INCOME_TOTAL": "AMT_INCOME_TOTAL",
+    "LOG_AMT_CREDIT": "AMT_CREDIT",
+    "LOG_AMT_ANNUITY": "AMT_ANNUITY",
+    "LOG_AMT_GOODS_PRICE": "AMT_GOODS_PRICE"
+  },
+  "limites": {
+    "LOG_AMT_INCOME_TOTAL": {
+      "inf": 10.357742824813725,
+      "sup": 13.710150042306449
+    },
+    "LOG_AMT_CREDIT": {
+      "inf": 10.77833109449611,
+      "sup": 14.738697456526271
+    },
+    "LOG_AMT_ANNUITY": {
+      "inf": 8.274864471975208,
+      "sup": 11.61266776475131
+    },
+    "LOG_AMT_GOODS_PRICE": {
+      "inf": 10.714417768752456,
+      "sup": 14.626440774180603
+    },
+    "LOG_BUREAU_DEUDA_TOTAL": {
+      "inf": -7.283224821899696,
+      "sup": 16.58450846984547
+    },
+    "LOG_HC_CARD_MAX_ULTIMO_SALDO": {
+      "inf": 0.0,
+      "sup": 13.735818902066773
+    },
+    "RATIO_CREDITO_INGRESO": {
+      "inf": 0.3198,
+      "sup": 19.30021333333357
+    },
+    "RATIO_CUOTA_INGRESO": {
+      "inf": 0.02290592,
+      "sup": 0.7204677333333346
+    },
+    "PLAZO_IMPLICITO": {
+      "inf": 8.33137944509574,
+      "sup": 37.91456468933751
+    },
+    "RATIO_CREDITO_BIEN": {
+      "inf": 1.0,
+      "sup": 1.528
+    },
+    "LOG_INGRESO_POR_MIEMBRO": {
+      "inf": 9.328123407632566,
+      "sup": 13.279367126213993
+    },
+    "N_DOCUMENTOS": {
+      "inf": 0.0,
+      "sup": 2.0
+    },
+    "RATIO_EMPLEO_EDAD": {
+      "inf": -0.0,
+      "sup": 0.6565914914161568
+    },
+    "N_INCONSISTENCIAS_DIRECCION": {
+      "inf": 0.0,
+      "sup": 6.0
+    },
+    "TASA_DEF_CIRCULO_30": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "EXT_SOURCE_PROMEDIO": {
+      "inf": 0.018875405915134966,
+      "sup": 0.8093602910664686
+    },
+    "EXT_SOURCE_MIN": {
+      "inf": 0.0005272652387098,
+      "sup": 0.7896672989316592
+    },
+    "EXT_SOURCE_N_DISPONIBLES": {
+      "inf": 1.0,
+      "sup": 3.0
+    },
+    "RATIO_DEUDA_BURO_INGRESO": {
+      "inf": -0.006277535000000002,
+      "sup": 74.9651903000052
+    },
+    "PROP_CREDITOS_ACTIVOS_BURO": {
+      "inf": 0.0,
+      "sup": 1.0
+    },
+    "N_CONSULTAS_BURO": {
+      "inf": 0.0,
+      "sup": 14.0
+    },
+    "PROP_APROBADAS_HC": {
+      "inf": 0.0,
+      "sup": 1.0
+    }
+  }
+}

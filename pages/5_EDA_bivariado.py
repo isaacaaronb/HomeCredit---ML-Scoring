@@ -90,6 +90,8 @@ fu = t("filtro_univariado")
 bq = t("binning_qcut")
 bo = t("binning_optb")
 BASE = float(bo.groupby("variable").apply(lambda d: d["k"].sum() / d["n"].sum()).iloc[0])
+_ruta_fe = REPO_DIR / "artifacts" / "features" / "catalogo.parquet"
+FE_VARS = set(_leer(str(_ruta_fe), _ruta_fe.stat().st_mtime)["variable"])
 
 # ── Encabezado ─────────────────────────────────────────────────────────────────
 st.title("EDA bivariado")
@@ -98,7 +100,8 @@ st.markdown(
     "**tasa de default por tramo**: `qcut` en 5 tramos para las continuas (Paso 6.1) y *binning* supervisado con **OptBinning** "
     "(Paso 6.2), que es el que mide el poder predictivo. Todo se aprende **solo con train** (80 %); test (20 %) sirve para "
     "comprobar que el patrón se repite. El filtro (Pasos 6.3–6.4) usa **un único criterio para todos los modelos: IV ≥ 0.05**, "
-    "porque el entrenamiento parte de **un solo dataset**. El Gini se sigue reportando como información."
+    "porque el entrenamiento parte de **un solo dataset**. El Gini se sigue reportando como información. Las variables de "
+    "*feature engineering* se evalúan igual que las del tablón (marcadas con «FE» en el selector)."
 )
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Variables evaluadas", len(bi), border=True, help="Las que pasaron el filtro univariado.")
@@ -124,14 +127,14 @@ with tab_var:
     ops = lista["variable"].tolist()
     defecto = "EXT_SOURCE_3" if "EXT_SOURCE_3" in ops else ops[0]
     var = f1.selectbox("Variable (ordenadas por IV)", ops, index=ops.index(defecto), key="var_bi",
-                       format_func=lambda v: f"{v}  ·  IV {lista.set_index('variable').loc[v, 'iv']:.3f}")
+                       format_func=lambda v: f"{v}  ·  IV {lista.set_index('variable').loc[v, 'iv']:.3f}" + ("  ·  FE" if v in FE_VARS else ""))
     r = bi.set_index("variable").loc[var]
     es_num = r["tipo"] == "numérica"
     opciones_tram = ["qcut 5", "qcut 10", "OptBinning"] if es_num else ["Categorías", "OptBinning"]
     tram = f3.segmented_control("Trameado", opciones_tram, default=opciones_tram[0], key="tram_bi")
     tram = tram or opciones_tram[0]
     if isinstance(r.get("descripcion"), str) and r["descripcion"]:
-        st.caption(f"{fam_corta(r['familia'])} · {r['descripcion']}")
+        st.caption(("Feature engineering · " if var in FE_VARS else "") + f"{fam_corta(r['familia'])} · {r['descripcion']}")
 
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("IV (OptBinning)", f"{r['iv']:.3f}", help="Information Value con los tramos de OptBinning en train: el criterio de selección.")
@@ -300,7 +303,7 @@ with tab_rank:
         st.caption(", ".join(bi.loc[bi["iv"] >= umbral].sort_values("iv", ascending=False)["variable"].head(18)) +
                    (" …" if n_pasa > 18 else ""))
         nota(f"Con **IV ≥ 0.05** pasan **{int(bi['pasa'].sum())} variables**. Con el umbral anterior de 0.1 eran solo "
-             f"{int((bi['iv'] >= 0.1).sum())} (los tres scores externos y la antigüedad laboral). Bajar el corte suma variables de "
+             f"{int((bi['iv'] >= 0.1).sum())} (los scores externos y sus combinaciones, más la antigüedad laboral). Bajar el corte suma variables de "
              "solicitud, ocupación e historial: el modelo depende menos de los scores externos, a cambio de señales individuales más "
              "débiles (todas en el rango «Weak»).", ":material/balance:")
 
@@ -324,7 +327,8 @@ with tab_pat:
         tooltip=[alt.Tooltip("grupo_guia:N", title="Patrón"), alt.Tooltip("n:Q", title="Variables")]), width="stretch", height=260)
     with p2:
         st.markdown(
-            "- **Separación clara entre clases** (IV ≥ 0.1): `EXT_SOURCE_3`, `EXT_SOURCE_2`, `EXT_SOURCE_1` y `DAYS_EMPLOYED`.\n"
+            "- **Separación clara entre clases** (IV ≥ 0.1): " + ", ".join(f"`{v}`" for v in bi[bi["iv"] >= 0.1].sort_values("iv", ascending=False)["variable"])
+            + ". Los scores externos dominan, también en sus versiones de feature engineering (promedio y mínimo).\n"
             "- **Tendencia monótona**: los scores externos (más score, menos default), `DAYS_BIRTH` (más joven, más riesgo), la "
             "proporción de pagos tardíos y los créditos activos en el buró (más atraso o más deuda, más riesgo). Es lo esperado del negocio.\n"
             "- **No lineal**: `DAYS_EMPLOYED` (el 0 del centinela baja el riesgo al final) y `AMT_CREDIT` (los créditos medianos "

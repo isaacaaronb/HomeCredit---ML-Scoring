@@ -2,7 +2,8 @@
 
 Dos pasadas, como pide la guía:
   - ex-ante : tablón oficial tal como llega        (artifacts/tablon_general.parquet)
-  - ex-post : tablón tras el preprocesamiento      (artifacts/tablon_tratado.parquet)
+  - ex-post : tablón tras el preprocesamiento y el feature engineering
+              (artifacts/tablon_tratado.parquet + artifacts/tablon_features.parquet). Las variables nuevas solo existen ex-post.
 
 La metodología replica la del notebook `notebooks/01_eda_univariado.ipynb` (Paso 4):
   - clasificación de variables con la regla del notebook (≤ 5 valores numéricos → categórica), fijada con el
@@ -294,11 +295,14 @@ FAMILIA_FLAGS = {"flag_sin_buro": "05 · Buró de crédito", "flag_sin_previas":
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    bases = {"ex-ante": pd.read_parquet(ART / "tablon_general.parquet"), "ex-post": pd.read_parquet(ART / "tablon_tratado.parquet")}
+    post = pd.read_parquet(ART / "tablon_tratado.parquet").merge(pd.read_parquet(ART / "tablon_features.parquet"), on=ID, how="left")
+    bases = {"ex-ante": pd.read_parquet(ART / "tablon_general.parquet"), "ex-post": post}
     dicc = pd.read_csv(REPO / "data_dictionary" / "diccionario_tablon.csv").set_index("variable")
-    ante, post = bases["ex-ante"], bases["ex-post"]
+    fe = pd.read_parquet(ART / "features" / "catalogo.parquet").set_index("variable")
+    ante = bases["ex-ante"]
     global LIMITES
     LIMITES = json.load(open(ART / "parametros_outliers.json", encoding="utf-8")).get("limites", {})
+    LIMITES.update(json.load(open(ART / "parametros_features.json", encoding="utf-8")).get("limites", {}))
     N = len(post)
 
     # ── Tipos: regla del notebook sobre la base ex-ante (estable frente al tratamiento) ──
@@ -311,15 +315,23 @@ def main() -> None:
         nota = ""
         if c == "CODE_GENDER":
             tipo, nota = "dicotómica", "Ex-ante tenía 3 valores (F, M y 4 'XNA'); 'XNA' era un faltante codificado."
+        elif c in fe.index:
+            nota = "Creada en feature engineering."
         elif c not in ante:
             nota = "Creada en el preprocesamiento."
         elif clasificar(post[c]) != clasificar(ante[c]) and c not in FORZAR_TIPO:
             nota = f"Con la regla (≤ {UMBRAL_CAT_NUM} valores) sería «{clasificar(post[c])}» tras el capeo; se mantiene «{tipo}»."
-        familia = dicc.loc[c, "familia"] if c in dicc.index else FAMILIA_FLAGS.get(c, "02 · Perfil del solicitante")
-        bloque = dicc.loc[c, "bloque"] if c in dicc.index else "Indicadores del preprocesamiento"
-        filas_tipo.append({"variable": c, "tipo": tipo, "familia": familia, "bloque": bloque,
-                           "tipo_dato": dicc.loc[c, "tipo_dato"] if c in dicc.index else "Dicotómica",
-                           "descripcion": dicc.loc[c, "descripcion"] if c in dicc.index else "", "nota_tipo": nota,
+        if c in fe.index:
+            familia, bloque = fe.loc[c, "familia"], fe.loc[c, "bloque"]
+            tipo_dato = "Numérica continua" if fe.loc[c, "n_unicos"] > 30 else "Numérica discreta"
+            descripcion = f"{fe.loc[c, 'lectura']} Fórmula: {fe.loc[c, 'formula']}."
+        else:
+            familia = dicc.loc[c, "familia"] if c in dicc.index else FAMILIA_FLAGS.get(c, "02 · Perfil del solicitante")
+            bloque = dicc.loc[c, "bloque"] if c in dicc.index else "Indicadores del preprocesamiento"
+            tipo_dato = dicc.loc[c, "tipo_dato"] if c in dicc.index else "Dicotómica"
+            descripcion = dicc.loc[c, "descripcion"] if c in dicc.index else ""
+        filas_tipo.append({"variable": c, "tipo": tipo, "familia": familia, "bloque": bloque, "tipo_dato": tipo_dato,
+                           "descripcion": descripcion, "nota_tipo": nota, "feature_engineering": c in fe.index,
                            "orden": int(dicc.loc[c, "orden"]) if c in dicc.index else 1000 + len(filas_tipo)})
     tipos = pd.DataFrame(filas_tipo)
     tipos.to_parquet(OUT / "tipos.parquet", index=False)
@@ -332,6 +344,8 @@ def main() -> None:
     for pasada, df in bases.items():
         rng = np.random.default_rng(SEMILLA)                 # misma secuencia que el notebook
         for c in NUM:
+            if c not in df:                                  # variables de feature engineering: solo ex-post
+                continue
             m = metricas_numericas(df[c])
             met.append({"pasada": pasada, "variable": c, **m})
             top5 += [{"pasada": pasada, "variable": c, **r, "valor": fmt_valor(r["valor"])} for r in top_valores(df[c], 5, dropna=True)]
@@ -377,6 +391,8 @@ def main() -> None:
     catm, catf = [], []
     for pasada, df in bases.items():
         for c in CAT:
+            if c not in df:
+                continue
             catm.append({"pasada": pasada, "variable": c, **metricas_categorica(df[c])})
             s = df[c]
             vc = s.value_counts(dropna=False)
@@ -399,7 +415,7 @@ def main() -> None:
 
     # ── Muestra para dispersión numérica–numérica ──
     idx = np.random.default_rng(SEMILLA).choice(N, size=N_SCATTER, replace=False)
-    muestra = pd.concat([ante.iloc[idx][NUM].assign(pasada="ex-ante"), post.iloc[idx][NUM].assign(pasada="ex-post")])
+    muestra = pd.concat([ante.iloc[idx].reindex(columns=NUM).assign(pasada="ex-ante"), post.iloc[idx][NUM].assign(pasada="ex-post")])
     muestra.to_parquet(OUT / "muestra_dispersion.parquet", index=False)
 
     # ── Vista previa de redundancia en vivienda (_AVG/_MODE/_MEDI): se confirma en el multivariado ──
@@ -453,6 +469,7 @@ def main() -> None:
     pd.DataFrame(ver).to_parquet(OUT / "verificacion.parquet", index=False)
 
     resumen = {"filas": N, "n_numericas": len(NUM), "n_categoricas": len(CAT), "n_dicotomicas": len(DIC),
+               "n_feature_engineering": int(tipos["feature_engineering"].sum()),
                "target_0": int(vc_t.loc[0]), "target_1": int(vc_t.loc[1]), "tasa_default": float(post[TARGET].mean()),
                "n_muestra_ajuste": N_MUESTRA_AJUSTE, "semilla": SEMILLA}
     json.dump(resumen, open(OUT / "resumen.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)

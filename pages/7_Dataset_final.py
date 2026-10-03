@@ -1,4 +1,4 @@
-"""Dataset final: dataset de entrenamiento único (versión original y versión SMOTE), vista WoE y espacio de feature engineering."""
+"""Dataset final: dataset de entrenamiento único (versión original y versión SMOTE) y vista WoE."""
 from pathlib import Path
 
 import altair as alt
@@ -54,20 +54,21 @@ k4.metric("Train SMOTE", f"{int(R.loc['Train SMOTE', 'filas']):,}", f"+{int(R.lo
           delta_color="off", border=True)
 k5.metric("Test (sin tocar)", f"{int(R.loc['Test', 'filas']):,}", border=True, help="20 %: nunca se rebalancea.")
 
-tab_ds, tab_woe, tab_sm, tab_fe = st.tabs([":material/dataset: Dataset de entrenamiento", ":material/functions: Vista WoE (logística)",
-                                           ":material/balance: Rebalanceo con SMOTE", ":material/construction: Feature engineering"])
+tab_ds, tab_woe, tab_sm = st.tabs([":material/dataset: Dataset de entrenamiento", ":material/functions: Vista WoE (logística)",
+                                   ":material/balance: Rebalanceo con SMOTE"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_ds:
     fm = feat.copy()
     st.markdown(f"**{n_var} variables** (IV ≥ 0.05, sin redundancias) → **{len(fm)} columnas** al agregar los indicadores de nulo.")
-    fm["clase"] = np.where(fm["columna"].str.endswith("__nulo"), "Indicador de nulo",
-                           np.where(fm["transformacion"].str.startswith("Agrupada"), "Agrupada por default",
-                                    np.where(fm["transformacion"].str.contains("mediana"), "Original + mediana", "Original")))
+    fm["clase"] = np.select([fm["columna"].str.endswith("__nulo"), fm["transformacion"].str.startswith("Agrupada"),
+                             fm["transformacion"].str.startswith("Creada"), fm["transformacion"].str.contains("mediana")],
+                            ["Indicador de nulo", "Agrupada por default", "Feature engineering", "Original + mediana"], "Original")
     m1, m2 = st.columns([3, 2], gap="large")
-    m1.dataframe(fm.assign(familia=fm["familia"].map(fam_corta))[["columna", "transformacion", "iv", "gini", "pct_nulos_train", "familia"]],
+    m1.dataframe(fm.assign(familia=fm["familia"].map(fam_corta))[["columna", "origen", "transformacion", "iv", "gini", "pct_nulos_train", "familia"]],
                  hide_index=True, width="stretch", height=38 + 35 * len(fm),
                  column_config={"columna": st.column_config.TextColumn("Columna", pinned=True, width=250),
+                                "origen": st.column_config.TextColumn("Origen", width=140),
                                 "familia": st.column_config.TextColumn("Familia", width=170),
                                 "transformacion": st.column_config.TextColumn("Tratamiento", width=230),
                                 "iv": st.column_config.NumberColumn("IV", format="%.3f", width=60),
@@ -75,19 +76,23 @@ with tab_ds:
                                 "pct_nulos_train": st.column_config.ProgressColumn("% nulos (train)", format="percent", min_value=0, max_value=1)})
     with m2:
         cnt = fm.groupby("clase").size().reset_index(name="n")
-        orden_cl = ["Original", "Original + mediana", "Indicador de nulo", "Agrupada por default"]
+        orden_cl = ["Original", "Original + mediana", "Feature engineering", "Indicador de nulo", "Agrupada por default"]
         base_cl = alt.Chart(cnt, title=alt.TitleParams("Columnas por tratamiento", anchor="start")).encode(
-            y=alt.Y("clase:N", sort=orden_cl, title=None, axis=alt.Axis(labelLimit=200, labelFontSize=11)),
+            y=alt.Y("clase:N", sort=orden_cl, title=None, axis=alt.Axis(labelLimit=200, labelFontSize=11, labelOverlap=False)),
             x=alt.X("n:Q", title="Columnas", axis=alt.Axis(tickMinStep=1)))
         st.altair_chart(base_cl.mark_bar(height={"band": 0.6}, cornerRadiusEnd=4).encode(
-            color=alt.Color("clase:N", scale=alt.Scale(domain=orden_cl, range=[AZUL, "#7fb0ea", GRIS, VERDE]), legend=None),
+            color=alt.Color("clase:N", scale=alt.Scale(domain=orden_cl, range=[AZUL, "#7fb0ea", "#7f5fc8", GRIS, VERDE]), legend=None),
             tooltip=[alt.Tooltip("clase:N", title="Tratamiento"), alt.Tooltip("n:Q", title="Columnas")])
             + base_cl.mark_text(align="left", dx=4, color=TINTA, fontSize=12).encode(text="n:Q"),
-            width="stretch", height=200)
+            width="stretch", height=240)
         st.markdown(
             "- **¿Por qué imputar si XGBoost acepta nulos?** Porque **SMOTE no**: necesita valores para interpolar. Se imputa "
             "con la mediana de train y se agrega un **indicador** para no perder la señal del nulo. Para que las dos versiones "
             "tengan las mismas columnas, el train original lleva la misma imputación.\n"
+            f"- **{fm.loc[~fm['columna'].str.endswith('__nulo') & fm['origen'].eq('Feature engineering'), 'variable'].nunique()} variables "
+            "vienen de feature engineering**: " + ", ".join(f"`{v}`" for v in fm.loc[~fm["columna"].str.endswith("__nulo") &
+                                                                                   fm["origen"].eq("Feature engineering"), "variable"]) +
+            ". Pasaron los mismos filtros que las del tablón.\n"
             "- `OCCUPATION_TYPE` y `ORGANIZATION_TYPE` entran **agrupadas** por tasa de default (G1 = menor riesgo); las demás "
             "categóricas, con sus categorías originales. El *encoding* final (WoE, one-hot u ordinal) lo decide cada modelo.")
     t1, t2 = st.columns([3, 2], gap="large")
@@ -202,49 +207,6 @@ with tab_sm:
         "usarlas como PD hay que recalibrarlas (p. ej. corrección por prevalencia: odds × 0.0807/0.9193 ÷ (0.5/0.5), o "
         "calibración isotónica en una muestra sin rebalancear). (3) El umbral de 50 % de la guía deja de ser neutral: conviene "
         "comparar modelos con AUC / Gini / KS, que no dependen del umbral.", icon=":material/rule:")
-
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_fe:
-    st.markdown(
-        "Espacio reservado para **feature engineering**, a revisar con la profesora. Son variables **propuestas** a partir de "
-        "relaciones de negocio; se midió su IV en train (mismos parámetros de OptBinning) y su redundancia con las variables ya "
-        "seleccionadas, **pero no entran al dataset** hasta que se apruebe su inclusión.")
-    fe = t("feature_engineering")
-    fe["veredicto"] = np.select(
-        [fe["iv"] >= 0.5, fe["max_rho_seleccionadas"] > 0.6, fe["pasaria"]],
-        ["IV ≥ 0.5: revisar sobreajuste", "Redundante con una seleccionada", "Candidata (IV ≥ 0.05)"], default="IV < 0.05")
-    st.dataframe(fe[["feature", "formula", "lectura", "iv", "gini", "max_rho_seleccionadas", "variable_mas_correlacionada", "veredicto"]],
-                 hide_index=True, width="stretch", height=300,
-                 column_config={"feature": st.column_config.TextColumn("Feature", pinned=True, width=200),
-                                "formula": st.column_config.TextColumn("Fórmula", width=230), "lectura": st.column_config.TextColumn("Idea de negocio", width=330),
-                                "iv": st.column_config.NumberColumn("IV", format="%.3f"), "gini": st.column_config.NumberColumn("Gini", format="%.3f"),
-                                "max_rho_seleccionadas": st.column_config.NumberColumn("|ρ| máx.", format="%.2f", help="Con las variables numéricas del dataset final."),
-                                "variable_mas_correlacionada": st.column_config.TextColumn("Más parecida a", width=200),
-                                "veredicto": st.column_config.TextColumn("Lectura preliminar", width=230)})
-    f1, f2 = st.columns([3, 2], gap="large")
-    f1.altair_chart((alt.Chart(fe).mark_circle(size=160, opacity=0.85, stroke="white").encode(
-        x=alt.X("max_rho_seleccionadas:Q", title="|ρ| máximo con las variables ya seleccionadas", scale=alt.Scale(domain=[0, 1])),
-        y=alt.Y("iv:Q", title="IV (train, escala raíz)", scale=alt.Scale(type="sqrt")),
-        color=alt.Color("veredicto:N", scale=alt.Scale(domain=["Candidata (IV ≥ 0.05)", "Redundante con una seleccionada", "IV ≥ 0.5: revisar sobreajuste", "IV < 0.05"],
-                                                       range=[VERDE, GRIS, NARANJA, BARRA]), legend=alt.Legend(orient="top", title=None, columns=2, labelLimit=280)),
-        tooltip=[alt.Tooltip("feature:N"), alt.Tooltip("iv:Q", format=".3f"), alt.Tooltip("max_rho_seleccionadas:Q", format=".2f")])
-        + alt.Chart(fe).mark_text(dx=10, align="left", fontSize=10, color=TINTA).encode(x="max_rho_seleccionadas:Q", y="iv:Q", text="feature:N")
-        + alt.Chart(pd.DataFrame({"x": [0.6]})).mark_rule(strokeDash=[4, 3], color=GRIS).encode(x="x:Q")
-        + alt.Chart(pd.DataFrame({"y": [0.05]})).mark_rule(strokeDash=[4, 3], color=GRIS).encode(y="y:Q"))
-        .properties(title="Poder (IV) vs. redundancia de las propuestas"), width="stretch", height=380)
-    with f2:
-        fx = fe.set_index("feature")
-        st.markdown(
-            "**Para discutir**\n\n"
-            f"- `EXT_SOURCE_PROMEDIO` tiene **IV {fx.loc['EXT_SOURCE_PROMEDIO', 'iv']:.2f}**: cae en el rango «revisar sobreajuste». "
-            "No hay fuga (los scores existen al momento de la solicitud), pero combina tres variables ya seleccionadas: ¿reemplazarlas o sumarla?\n"
-            f"- `RATIO_CREDITO_BIEN` (≈ LTV) tiene IV {fx.loc['RATIO_CREDITO_BIEN', 'iv']:.3f} y **casi no se parece** a nada "
-            "seleccionado: es la candidata más limpia.\n"
-            f"- `RATIO_EMPLEO_EDAD` es casi la misma variable que `DAYS_EMPLOYED` (ρ = {fx.loc['RATIO_EMPLEO_EDAD', 'max_rho_seleccionadas']:.2f}).\n"
-            "- Los ratios de capacidad de pago (`RATIO_CUOTA_INGRESO`, `RATIO_CREDITO_INGRESO`) tienen **IV < 0.02**: la "
-            "intuición de negocio no siempre se confirma en los datos.")
-    st.caption("Estas cifras se calcularon solo con train. Si alguna propuesta se aprueba, debe pasar por los mismos filtros "
-               "(univariado, bivariado y multivariado) antes de entrar al dataset final.")
 
 st.divider()
 st.caption("Fuente: `scripts/pipeline_modelado.py datasets`. Los archivos completos (`artifacts/modelado/datasets/*.parquet`: "

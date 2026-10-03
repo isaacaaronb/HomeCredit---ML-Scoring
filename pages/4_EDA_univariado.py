@@ -13,7 +13,7 @@ UNI = REPO_DIR / "artifacts" / "univariado"
 AZUL, NARANJA, VERDE, GRIS, TINTA = "#2a78d6", "#eb6834", "#1baf7a", "#8a8a85", "#2b2b29"
 COLOR_TIPO = alt.Scale(domain=["numérica", "categórica", "dicotómica"], range=[AZUL, NARANJA, VERDE])
 PCT = alt.Axis(format="%")
-PASADAS = {"Ex-post · tras el preprocesamiento": "ex-post", "Ex-ante · tablón original": "ex-ante"}
+PASADAS = {"Ex-post · tratado + FE": "ex-post", "Ex-ante · tablón original": "ex-ante"}
 
 
 @st.cache_data(show_spinner=False)
@@ -99,6 +99,36 @@ ESPERADO = {
                                "tarjeta sin uso y tarjeta al tope.",
     "HC_N_REGISTROS_PAGO": "Registros de cuotas pagadas: sesgo a la derecha, bien descrito por una lognormal.",
     "HC_DIAS_ULTIMA_DECISION": "Días desde la última decisión en Home Credit: la mayoría es reciente; cola larga hacia atrás.",
+    # ── Feature engineering ──
+    "LOG_AMT_INCOME_TOTAL": "Logaritmo del ingreso: la cola derecha desaparece y la forma queda casi simétrica (skew-normal). Es lo "
+                            "esperado si el ingreso es aproximadamente lognormal.",
+    "LOG_AMT_CREDIT": "Logaritmo del monto: casi simétrico, con una leve cola izquierda (créditos pequeños). Los picos de montos "
+                      "redondos siguen ahí: el logaritmo cambia la escala, no los valores repetidos.",
+    "LOG_AMT_ANNUITY": "Logaritmo de la cuota: la variable mejor descrita por una distribución teórica (D ≈ 0.02).",
+    "LOG_AMT_GOODS_PRICE": "Logaritmo del precio del bien: casi simétrico; conserva los picos de precios redondos.",
+    "LOG_BUREAU_DEUDA_TOTAL": "Logaritmo con signo de la deuda en buró: el 27 % sigue en 0 (sin deuda vigente) y el resto forma una "
+                              "campana. Es una mezcla «sin deuda / monto de la deuda»: ninguna familia la ajusta bien, y es normal.",
+    "LOG_HC_CARD_MAX_ULTIMO_SALDO": "Logaritmo del saldo de tarjeta: 64 % en 0 (tarjeta sin saldo) y una masa separada de saldos "
+                                    "positivos. El logaritmo separa las dos poblaciones, que en la escala original se confundían.",
+    "RATIO_CREDITO_INGRESO": "Crédito / ingreso: cola derecha (gamma); la mitad pide entre 2 y 5 veces su ingreso anual declarado.",
+    "RATIO_CUOTA_INGRESO": "Cuota / ingreso: cola derecha (gamma); la mayoría compromete menos del 25 % del ingreso.",
+    "PLAZO_IMPLICITO": "Crédito / cuota: casi simétrico, con picos en los plazos estándar de los productos.",
+    "RATIO_CREDITO_BIEN": "Crédito / precio del bien: un tercio vale exactamente 1 (se financia el precio) y casi todo el resto "
+                          "está entre 1.1 y 1.3 (seguros o comisiones financiados). Pocos niveles muy frecuentes.",
+    "LOG_INGRESO_POR_MIEMBRO": "Logaritmo del ingreso por integrante del hogar: casi simétrico, como el logaritmo del ingreso.",
+    "RATIO_EMPLEO_EDAD": "Proporción de la vida en el empleo actual: 18 % en 0 (sin empleo) y cola derecha; acotada en [0, 1].",
+    "N_INCONSISTENCIAS_DIRECCION": "Inconsistencias de dirección: 74 % en 0 y picos en 2 y 4, porque los indicadores región/ciudad "
+                                   "suelen activarse en parejas.",
+    "TASA_DEF_CIRCULO_30": "Tasa de default del círculo social: 54 % nula (sin círculo observado) y, entre quienes tienen dato, 75 % en 0.",
+    "EXT_SOURCE_PROMEDIO": "Promedio de los scores externos: acotado en [0, 1], sesgado a la izquierda como sus componentes y casi sin "
+                           "nulos. Promediar suaviza la forma (D ≈ 0.02 frente a skew-normal).",
+    "EXT_SOURCE_MIN": "Peor score disponible: casi simétrico; más bajo que el promedio por construcción.",
+    "RATIO_DEUDA_BURO_INGRESO": "Deuda en buró / ingreso: 27 % en 0 y una cola derecha larga incluso tras el capeo (asimetría ≈ 4.8). "
+                                "Sería candidata a logaritmo si fuera un monto; es un ratio y se deja así.",
+    "PROP_CREDITOS_ACTIVOS_BURO": "Proporción de créditos vigentes en buró: acotada en [0, 1], con masas en 0 (todo cerrado) y valores "
+                                  "intermedios frecuentes (1/2, 1/3…).",
+    "N_CONSULTAS_BURO": "Consultas al buró en el último año: conteo con sobredispersión, bien descrito por una binomial negativa.",
+    "PROP_APROBADAS_HC": "Tasa de aprobación en Home Credit: acotada en [0, 1] con una masa grande en 1 (todo aprobado).",
 }
 
 
@@ -119,8 +149,8 @@ etiqueta = c_p.segmented_control("Pasada", list(PASADAS), default=list(PASADAS)[
                                  help="La guía propone dos pasadas: ex-ante (el dato tal como viene) y ex-post (después del "
                                       "preprocesamiento, para verificar que las transformaciones funcionaron).")
 P = PASADAS[etiqueta or list(PASADAS)[0]]
-c_i.caption("**Ex-post** (por defecto) es la base con la que se modelará. **Ex-ante** muestra el dato de origen, antes de imputar y "
-            "capear. La clasificación de tipos se fija con el tablón original (regla del notebook: numérica con ≤ 5 valores → "
+c_i.caption("**Ex-post** (por defecto) es la base con la que se modelará: tablón tratado + las variables de *feature "
+            "engineering*, que solo existen ex-post. **Ex-ante** muestra el dato de origen, antes de imputar y capear. La clasificación de tipos se fija con el tablón original (regla del notebook: numérica con ≤ 5 valores → "
             "categórica) para que el tratamiento no cambie el tipo de una variable.")
 
 num = t("num_metricas").query("pasada == @P").merge(tipos[["variable", "familia", "orden", "descripcion"]], on="variable")
@@ -132,6 +162,9 @@ k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Numéricas", R["n_numericas"], border=True)
 k2.metric("Categóricas", R["n_categoricas"], border=True)
 k3.metric("Dicotómicas", len(dic), border=True, help="Incluye los 4 flags creados en el preprocesamiento (solo ex-post).")
+if P == "ex-post":
+    st.caption(f"Incluye las **{R.get('n_feature_engineering', 0)} variables de feature engineering** (logaritmos, ratios y agregaciones), "
+               "que se analizan aquí con la misma metodología que las del tablón.")
 k4.metric("Tasa de default", f"{R['tasa_default']:.2%}", border=True, help=f"{R['target_1']:,} de {N:,} créditos.")
 k5.metric("Casi constantes", int(dic["casi_constante"].sum()), border=True, help="Dicotómicas con clase minoritaria < 1 %.")
 
@@ -235,7 +268,9 @@ with tab_pan:
         tabla_texto(tv)
     with v2:
         st.markdown(
-            "- **Missing**: bajó de 25.1 % a 23.9 % de celdas; el resto son nulos **estructurales** que se conservaron a propósito.\n"
+            f"- **Missing**: pasa de {v.loc['ex-ante', 'pct_celdas_nulas']:.1%} a {v.loc['ex-post', 'pct_celdas_nulas']:.1%} de las celdas "
+            "(ex-post incluye las variables de feature engineering, casi completas); lo que queda son nulos **estructurales** que se "
+            "conservaron a propósito.\n"
             f"- **Outliers**: la asimetría máxima cae de **{v.loc['ex-ante', 'asim_max']:.1f}** (`AMT_INCOME_TOTAL`) a **{v.loc['ex-post', 'asim_max']:.1f}** "
             f"(`{VAR_ASIM_POST}`, atrasos con masa en cero). Tras el capeo no queda ningún punto fuera de los bigotes p0.1–p99.9; el conteo "
             "de variables asimétricas casi no cambia, porque su asimetría es forma, no error.\n"
@@ -646,7 +681,7 @@ with tab_hal:
     with o2, st.container(border=True):
         st.markdown(
             "**2 · Asimetría y colas**\n\n"
-            "- 61 numéricas con |asimetría| > 2, sobre todo **vivienda** (en [0, 1], con muchos ceros) e **historial** (buró, POS, "
+            f"- {int((_post['asimetria'].abs() > 2).sum())} numéricas con |asimetría| > 2, sobre todo **vivienda** (en [0, 1], con muchos ceros) e **historial** (buró, POS, "
             "tarjeta, cuotas).\n"
             "- Las de atraso tienen **masa en cero** (47–99 % de ceros) y colas de miles de días: son mezclas «sin evento / magnitud».\n"
             "- `HC_CARD_MAX_UTILIZACION` es **bimodal** (tarjeta sin uso vs. tarjeta al tope).")
@@ -676,7 +711,8 @@ with tab_hal:
         "valores y la regla del notebook (≤ 5 → categórica) las cambiaría de tipo. Se mantuvieron numéricas: ¿un conteo debe "
         "cambiar de tipo por un tratamiento?\n"
         "3. **log(1 + x) no sirve en [0, 1].** La regla del notebook marca 31 variables de vivienda para la vista log, pero en ese rango "
-        "la transformación casi no cambia la forma. Si se transforma, debe ser por evidencia, no por regla.\n"
+        "la transformación casi no cambia la forma. Si se transforma, debe ser por evidencia, no por regla: es el criterio que se "
+        "aplicó a los montos en *Feature engineering* (el logaritmo sigue solo donde mejora el ajuste del log-odds).\n"
         "4. **`CODE_GENDER` como predictor.** Estadísticamente es una dicotómica bien balanceada, aunque con IV 0.039 no llega al corte "
         "de 0.05 del bivariado. Si hubiera pasado, ¿debería entrar? Usar el género en una decisión de crédito es discutible "
         "regulatoriamente en muchas jurisdicciones."
@@ -703,22 +739,28 @@ with tab_fil:
         st.markdown(":blue-badge[Alta cardinalidad]  \nMás de **15** categorías. Se **agrupan por tasa de default** (OptBinning "
                     "categórico, ≤ 5 grupos, ≥ 5 % por grupo). Si no hay grupos con default distinto, se elimina.  \n**Decisión:** agrupar.")
 
-    fu["motivo_corto"] = np.select([fu["decision"].eq("Agrupa"), fu["motivo"].str.startswith("Varianza"),
+    st.caption("Además, de cada par **monto / logaritmo** creado en *feature engineering* sigue uno solo (ordenan igual a los "
+               "clientes y tienen el mismo IV): :violet-badge[Sustituida (monto ↔ logaritmo)].")
+
+    fu["motivo_corto"] = np.select([fu["decision"].eq("Agrupa"), fu["motivo"].str.startswith("Sustituida"), fu["motivo"].str.startswith("Varianza"),
                                     fu["motivo"].str.contains("no lo compensa"), fu["motivo"].str.contains("se conserva")],
-                                   ["Agrupada por tasa de default", "Elimina · varianza casi nula", "Elimina · nulos sin poder",
-                                    "Pasa · nulo informativo"], "Pasa")
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Variables evaluadas", len(fu), border=True)
+                                   ["Agrupada por tasa de default", "Sustituida (monto ↔ logaritmo)", "Elimina · varianza casi nula",
+                                    "Elimina · nulos sin poder", "Pasa · nulo informativo"], "Pasa")
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Variables evaluadas", len(fu), border=True, help="Tablón tratado + feature engineering.")
     k2.metric("Pasan al bivariado", int((fu["decision"] != "Elimina").sum()), border=True)
     k3.metric("Eliminadas · varianza", int(fu["motivo_corto"].eq("Elimina · varianza casi nula").sum()), border=True)
     k4.metric("Eliminadas · nulos", int(fu["motivo_corto"].eq("Elimina · nulos sin poder").sum()), border=True)
+    k5.metric("Sustituidas · log", int(fu["motivo_corto"].eq("Sustituida (monto ↔ logaritmo)").sum()), border=True,
+              help="De cada par monto / logaritmo sigue uno solo (ver Feature engineering).")
 
-    DOM = ["Pasa", "Pasa · nulo informativo", "Agrupada por tasa de default", "Elimina · nulos sin poder", "Elimina · varianza casi nula"]
-    RNG = [AZUL, "#7fb0ea", VERDE, NARANJA, "#c2410c"]
+    DOM = ["Pasa", "Pasa · nulo informativo", "Agrupada por tasa de default", "Sustituida (monto ↔ logaritmo)", "Elimina · nulos sin poder",
+           "Elimina · varianza casi nula"]
+    RNG = [AZUL, "#7fb0ea", VERDE, "#7f5fc8", NARANJA, "#c2410c"]
     f1, f2 = st.columns([3, 2], gap="large")
     base_p = alt.Chart(fu).encode(
         x=alt.X("pct_nulos:Q", title="% de nulos (train)", axis=PCT, scale=alt.Scale(domain=[0, 0.8])),
-        y=alt.Y("gini:Q", title="Gini univariado (train)", scale=alt.Scale(type="sqrt", domain=[0, 0.32])))
+        y=alt.Y("gini:Q", title="Gini univariado (train)", scale=alt.Scale(type="sqrt", domain=[0, max(0.32, float(fu["gini"].max()) * 1.05)])))
     puntos = base_p.mark_circle(size=70, opacity=0.85, stroke="white", strokeWidth=0.8).encode(
         color=alt.Color("motivo_corto:N", scale=alt.Scale(domain=DOM, range=RNG), legend=alt.Legend(orient="top", title=None, columns=2, labelLimit=260)),
         tooltip=[alt.Tooltip("variable:N"), alt.Tooltip("motivo_corto:N", title="Decisión"), alt.Tooltip("pct_nulos:Q", format=".1%", title="% nulos"),
@@ -742,8 +784,8 @@ with tab_fil:
          "pero **se conserva**, porque «no tener tarjeta» separa el riesgo (Gini 0.097). Un nulo no es malo por sí mismo.")
 
     st.markdown("**Decisión por variable**")
-    sel_d = st.multiselect("Filtrar", DOM, default=["Agrupada por tasa de default", "Elimina · nulos sin poder", "Elimina · varianza casi nula",
-                                                     "Pasa · nulo informativo"], key="f_uni")
+    sel_d = st.multiselect("Filtrar", DOM, default=["Agrupada por tasa de default", "Sustituida (monto ↔ logaritmo)", "Elimina · nulos sin poder",
+                                                     "Elimina · varianza casi nula", "Pasa · nulo informativo"], key="f_uni")
     vf = fu[fu["motivo_corto"].isin(sel_d)] if sel_d else fu
     st.dataframe(vf.sort_values(["motivo_corto", "variable"])[["variable", "tipo", "familia", "pct_nulos", "pct_dominante", "gini", "motivo_corto", "motivo"]]
                  .assign(familia=lambda d: d["familia"].map(fam_corta)), hide_index=True, width="stretch", height=380,
@@ -792,5 +834,5 @@ with tab_fil:
                "`OCCUPATION_TYPE` queda como grupo propio «Sin dato».")
 
 st.divider()
-st.caption("Fuente: `artifacts/tablon_general.parquet` (ex-ante) y `artifacts/tablon_tratado.parquet` (ex-post). Metodología del "
+st.caption("Fuente: `artifacts/tablon_general.parquet` (ex-ante) y `artifacts/tablon_tratado.parquet` + `artifacts/tablon_features.parquet` (ex-post). Metodología del "
            "notebook `notebooks/01_eda_univariado.ipynb` (Paso 4); tablas precalculadas con `scripts/build_univariado.py`.")

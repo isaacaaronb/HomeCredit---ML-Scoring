@@ -47,10 +47,10 @@ n_tot = len(fu)
 n_uni = int((fu["decision"] != "Elimina").sum())
 n_bi = int(bi["pasa"].sum())
 n_mv = int(sel["seleccionada"].sum())
-emb = pd.DataFrame({"etapa": ["Tablón tratado", "Filtro univariado", "Filtro bivariado (IV ≥ 0.05)", "Filtro multivariado"],
+emb = pd.DataFrame({"etapa": ["Tablón tratado + feature engineering", "Filtro univariado", "Filtro bivariado (IV ≥ 0.05)", "Filtro multivariado"],
                     "n": [n_tot, n_uni, n_bi, n_mv]})
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("Variables explicativas", n_tot, border=True)
+k1.metric("Variables explicativas", n_tot, border=True, help="Tablón tratado + variables de feature engineering.")
 k2.metric("Tras el univariado", n_uni, f"{n_uni - n_tot}", delta_color="off", border=True)
 k3.metric("Tras el bivariado", n_bi, f"{n_bi - n_uni}", delta_color="off", border=True)
 k4.metric("Dataset final", n_mv, f"{n_mv - n_bi}", delta_color="off", border=True)
@@ -123,18 +123,42 @@ with tab_par:
             tooltip=[alt.Tooltip("par:N"), alt.Tooltip("rho:Q", format=".3f"), alt.Tooltip("resultado:N")])
             + alt.Chart(pd.DataFrame({"x": [RHO_MAX]})).mark_rule(color=TINTA, strokeDash=[4, 3]).encode(x="x:Q"),
             width="stretch", height=max(180, 48 * len(ch) + 70))
-        st.markdown(
-            "- **`AMT_CREDIT` sale frente a `AMT_GOODS_PRICE`** (ρ = 0.98): el monto del crédito es casi el precio del bien.\n"
-            "- **`HC_N_RECHAZADAS` sale frente a `HC_PROP_SOLICITUDES_RECHAZADAS`**: el conteo y la proporción de rechazos miden lo mismo; "
-            "la proporción tiene más IV porque no depende de cuántas solicitudes hizo el cliente.")
+        sel_i = sel.set_index("variable")
+        def sale_por(v, por):
+            return v in sel_i.index and not bool(sel_i.loc[v, "seleccionada"]) and sel_i.loc[v, "redundante_con"] == por
+        lecturas = []
+        if sale_por("AMT_CREDIT", "AMT_GOODS_PRICE"):
+            lecturas.append("**`AMT_CREDIT` sale frente a `AMT_GOODS_PRICE`** (ρ = 0.98): el monto del crédito es casi el precio del bien.")
+        if sale_por("HC_N_RECHAZADAS", "HC_PROP_SOLICITUDES_RECHAZADAS"):
+            lecturas.append("**`HC_N_RECHAZADAS` sale frente a `HC_PROP_SOLICITUDES_RECHAZADAS`**: el conteo y la proporción de rechazos "
+                            "miden lo mismo; la proporción tiene más IV porque no depende de cuántas solicitudes hizo el cliente.")
+        if sale_por("RATIO_EMPLEO_EDAD", "DAYS_EMPLOYED"):
+            lecturas.append("**`RATIO_EMPLEO_EDAD` (feature engineering) sale frente a `DAYS_EMPLOYED`** (ρ = −0.98): dividir la antigüedad "
+                            "por la edad casi no reordena a los clientes, así que no aporta información nueva.")
+        if sale_por("PROP_APROBADAS_HC", "HC_PROP_SOLICITUDES_RECHAZADAS"):
+            lecturas.append("**`PROP_APROBADAS_HC` (feature engineering) sale frente a la proporción de rechazos**: son casi complementos.")
+        if lecturas:
+            st.markdown("\n".join(f"- {x}" for x in lecturas))
+        ext_fuera = [v for v in ["EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3"] if sale_por(v, "EXT_SOURCE_PROMEDIO")]
         par_eb = p[(p["variable_1"] == "EXT_SOURCE_1") & (p["variable_2"] == "DAYS_BIRTH")]
-        if len(par_eb):
+        if ext_fuera:
+            rh = {v: abs(float(sel_i.loc[v, "medida_redundancia"])) for v in ext_fuera}
+            st.warning(
+                f"**Un par para pensar: `EXT_SOURCE_PROMEDIO` frente a los scores por separado.** El promedio (feature engineering, "
+                f"IV {float(sel_i.loc['EXT_SOURCE_PROMEDIO', 'iv']):.3f}) tiene más IV que cualquiera de los tres, y su correlación con "
+                "cada uno (" + ", ".join(f"`{v}` {r:.2f}" for v, r in rh.items()) + ") supera 0.6: la regla deja **solo el promedio**. "
+                "Es coherente con el filtro, pero tiene un costo: el promedio pesa igual a las tres fuentes, mientras que una logística "
+                "con los tres scores podría darle a cada uno su propio peso. Además, su IV supera 0.5, el nivel que la guía pide revisar. "
+                "¿Promedio o scores por separado? Conviene decidirlo comparando modelos, no solo con el IV."
+                + (" Efecto colateral: como `EXT_SOURCE_1` ya salió, `DAYS_BIRTH` (que antes perdía frente a ella por ρ = "
+                   f"{float(par_eb['rho'].iloc[0]):.3f}) ahora se conserva." if len(par_eb) and sale_por("EXT_SOURCE_1", "EXT_SOURCE_PROMEDIO")
+                   and bool(sel_i.loc["DAYS_BIRTH", "seleccionada"]) else ""),
+                icon=":material/psychology:")
+        elif len(par_eb) and str(par_eb["resultado"].iloc[0]).startswith("Conserva EXT_SOURCE_1"):
             rho_eb = float(par_eb["rho"].iloc[0])
             st.warning(
-                f"**Un par para pensar: `EXT_SOURCE_1` ↔ `DAYS_BIRTH` (ρ = {rho_eb:.3f}).** Ahora que `EXT_SOURCE_1` ya no se imputa, la "
-                "correlación es la de los datos originales (cuando se imputaba con la mediana por grupo de edad llegaba a −0.79: la "
-                f"imputación fabricaba parte de la redundancia). Con |ρ| = {abs(rho_eb):.3f} el par supera el umbral de 0.6 **por "
-                "milésimas**, y además se mide solo sobre el 44 % de créditos que tienen `EXT_SOURCE_1`. La regla excluye "
+                f"**Un par para pensar: `EXT_SOURCE_1` ↔ `DAYS_BIRTH` (ρ = {rho_eb:.3f}).** Con |ρ| = {abs(rho_eb):.3f} el par supera el "
+                "umbral de 0.6 **por milésimas**, y se mide solo sobre el 44 % de créditos que tienen `EXT_SOURCE_1`. La regla excluye "
                 "`DAYS_BIRTH`, pero es la decisión más frágil del filtro: un umbral de 0.61 la conservaría.",
                 icon=":material/psychology:")
 
@@ -155,9 +179,12 @@ with tab_fin:
     with f2:
         fs = fin[fin["seleccionada"]]
         st.markdown(f"**{len(fs)} variables finales** · dataset de entrenamiento único")
-        st.dataframe(fs.assign(familia=fs["familia"].map(fam_corta))[["variable", "iv", "familia"]],
+        fe_vars = set(pd.read_parquet(REPO_DIR / "artifacts" / "features" / "catalogo.parquet")["variable"])
+        fs = fs.assign(origen=np.where(fs["variable"].isin(fe_vars), "Feature eng.", "Tablón"))
+        st.dataframe(fs.assign(familia=fs["familia"].map(fam_corta))[["variable", "iv", "familia", "origen"]],
                      hide_index=True, width="stretch", height=38 + 35 * len(fs),
-                     column_config={"variable": st.column_config.TextColumn("Variable", width=215),
+                     column_config={"origen": st.column_config.TextColumn("Origen", width=95),
+                                    "variable": st.column_config.TextColumn("Variable", width=215),
                                     "familia": st.column_config.TextColumn("Familia", width=160),
                                     "iv": st.column_config.NumberColumn("IV", format="%.3f", width=60)})
     st.markdown("**Control adicional: correlación y VIF de las variables finales en WoE** (como las verá la regresión logística)")
