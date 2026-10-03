@@ -19,7 +19,8 @@ COLOR_TIPO = {  # badge de Streamlit por tipo de dato
 
 
 @st.cache_data(show_spinner=False)
-def cargar():
+def cargar(firma: tuple):
+    """`firma` (fechas de los archivos) entra en la llave del caché: un redeploy no sirve el diccionario viejo."""
     dicc = pd.read_csv(DICCIONARIO)
     fam = pd.read_csv(FAMILIAS)
     resumen = (dicc.groupby("familia")
@@ -68,7 +69,7 @@ COLUMNAS_DICC = {
     "origen": st.column_config.TextColumn("Origen", width=100),
 }
 
-dicc, fam, muestra, n_filas = cargar()
+dicc, fam, muestra, n_filas = cargar(tuple(p.stat().st_mtime for p in (DICCIONARIO, FAMILIAS, MUESTRA)))
 fmt_familia = etiqueta_familia(fam)
 
 # ── Encabezado ─────────────────────────────────────────────────────────────────
